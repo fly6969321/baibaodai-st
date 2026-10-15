@@ -1,0 +1,233 @@
+const NS = 'baobaodai';
+const IN_CHAT = 1, IN_PROMPT = 0, ROLE_SYSTEM = 0;
+
+export function ctx() {
+    const st = globalThis.SillyTavern;
+    if (!st || typeof st.getContext !== 'function') throw Error('酒馆上下文不可用，请确认版本');
+    return st.getContext();
+}
+
+export function hasCtx() {
+    try { ctx(); return true; } catch (_) { return false; }
+}
+
+export function cut(x, n) { return String(x == null ? '' : x).slice(0, n); }
+
+export function hash(s) {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+    return (h >>> 0).toString(16);
+}
+
+export function safeText(x, n) {
+    return cut(x, n).replace(/\{\{/g, '｛｛').replace(/\}\}/g, '｝｝')
+        .replace(/<\/?(?:system|assistant|user|developer|director)[^>]*>/gi, '').trim();
+}
+
+export function clone(x) { return JSON.parse(JSON.stringify(x)); }
+
+// 全局配置：extension_settings 整体进 settings.json
+export function readRawCfg() {
+    const c = ctx();
+    if (!c.extensionSettings[NS] || typeof c.extensionSettings[NS] !== 'object') c.extensionSettings[NS] = {};
+    return clone(c.extensionSettings[NS]);
+}
+
+export function writeRawCfg(next) {
+    const c = ctx();
+    c.extensionSettings[NS] = clone(next);
+    c.saveSettingsDebounced();
+}
+
+// chatMetadata 在切聊天时被整体替换，不能缓存引用，每次重取
+export function readRawState() {
+    const c = ctx();
+    const meta = c.chatMetadata;
+    if (!meta) return {};
+    const raw = meta[NS];
+    if (typeof raw === 'string') { try { return JSON.parse(raw); } catch (_) { return {}; } }
+    return raw && typeof raw === 'object' ? clone(raw) : {};
+}
+
+export function writeRawState(next) {
+    const c = ctx();
+    if (!c.chatMetadata) throw Error('当前没有打开的聊天');
+    c.chatMetadata[NS] = clone(next);
+    c.saveMetadataDebounced();
+}
+
+export function chatKey() {
+    const c = ctx();
+    if (c.groupId) return 'g:' + c.groupId;
+    const id = c.getCurrentChatId ? c.getCurrentChatId() : c.chatId;
+    if (id == null || id === '') return null;
+    return 'c:' + id;
+}
+
+export function chatInfo() {
+    const c = ctx();
+    const key = chatKey();
+    return { id: key, isGroup: !!c.groupId, characterId: c.characterId, groupId: c.groupId, messageCount: (c.chat || []).length };
+}
+
+export function messageText(m) {
+    return String(m && m.mes || '').replace(/<!--[\s\S]*?-->/g, '').trim();
+}
+
+export function narrativeText(m) {
+    return messageText(m)
+        .replace(/image###[\s\S]*?###/g, '')
+        .replace(/!\[(?:[^\]\\]|\\.)*\]\((?:[^()\\]|\\.|\([^()]*\))*\)/g, '')
+        .trim();
+}
+
+// is_system 同时表示「系统条」和「/hide 隐藏楼」，两者都不进 prompt
+export function messages() {
+    const c = ctx();
+    return (c.chat || []).map((m, index) => ({
+        index,
+        role: m.is_user ? 'user' : (m.is_system ? 'system' : 'assistant'),
+        hidden: !!m.is_system,
+        name: String(m && m.name || ''),
+        text: messageText(m),
+        narrative: narrativeText(m),
+        swipeId: typeof m.swipe_id === 'number' ? m.swipe_id : 0,
+        raw: m,
+    }));
+}
+
+export function assistantRound(ms) {
+    return ms.filter(m => m.role === 'assistant' && !m.hidden).length;
+}
+
+export function liveMessages(ms) {
+    return ms.filter(m => !m.hidden && (m.role === 'user' || m.role === 'assistant') && m.text);
+}
+
+// 消息没有稳定 id，只有数组下标；锚点用「最后一条用户楼的下标+正文指纹」
+export function anchorOf(ms) {
+    const user = ms.filter(m => m.role === 'user' && !m.hidden).pop();
+    return user ? user.index + ':' + hash(user.text) : '';
+}
+
+export function groundingSignature(m) {
+    return JSON.stringify([m.role, m.name, m.narrative]);
+}
+
+export function inject(key, text, depth, atPrompt) {
+    const c = ctx();
+    const value = String(text || '');
+    const position = atPrompt ? IN_PROMPT : IN_CHAT;
+    c.setExtensionPrompt(key, value, position, Math.max(0, Number(depth) || 0), false, ROLE_SYSTEM);
+}
+
+export function clearInject(key) {
+    try { ctx().setExtensionPrompt(key, '', IN_CHAT, 0, false, ROLE_SYSTEM); } catch (_) {}
+}
+
+export function substitute(text) {
+    try { return ctx().substituteParams(String(text || '')); } catch (_) { return String(text || ''); }
+}
+
+async function characterAt(chid) {
+    const c = ctx();
+    const list = c.characters || [];
+    if (chid == null || !list[chid]) return null;
+    if (list[chid].shallow && c.unshallowCharacter) { try { await c.unshallowCharacter(chid); } catch (_) {} }
+    return c.characters[chid] || list[chid];
+}
+
+function groupMemberIds() {
+    const c = ctx();
+    if (!c.groupId) return [];
+    const group = (c.groups || []).find(g => String(g.id) === String(c.groupId));
+    if (!group) return [];
+    const disabled = new Set((group.disabled_members || []).map(String));
+    return (group.members || [])
+        .filter(avatar => !disabled.has(String(avatar)))
+        .map(avatar => (c.characters || []).findIndex(x => x && x.avatar === avatar))
+        .filter(i => i >= 0);
+}
+
+export function activeCharacterIds() {
+    const c = ctx();
+    if (c.groupId) return groupMemberIds();
+    return c.characterId == null ? [] : [c.characterId];
+}
+
+// raw=true 时不展开宏：建池指纹要在同一聊天里稳定，不能随 persona 变动
+export async function characterSections(limit, opts) {
+    opts = opts || {};
+    const out = [];
+    for (const chid of activeCharacterIds().slice(0, limit)) {
+        const ch = await characterAt(chid);
+        if (!ch) continue;
+        const fields = [ch.name, ch.description, ch.personality, ch.scenario];
+        if (opts.withOpening) fields.push(ch.first_mes);
+        const text = fields.filter(Boolean).map(x => opts.raw ? String(x) : substitute(x)).join('\n');
+        if (text.trim()) out.push({ id: chid, text });
+    }
+    return out;
+}
+
+export function scenarioOverride(raw) {
+    const c = ctx();
+    const text = c.chatMetadata && c.chatMetadata.scenario;
+    if (!text) return '';
+    return raw ? String(text) : substitute(text);
+}
+
+export function personaSection(raw) {
+    const c = ctx();
+    const name = c.name1 || '';
+    const pu = c.powerUserSettings || {};
+    const description = pu.persona_description || '';
+    const text = [name, description].filter(Boolean).map(x => raw ? String(x) : substitute(x)).join('\n');
+    return text.trim();
+}
+
+export function personaId() {
+    const c = ctx();
+    return c.user_avatar || (c.powerUserSettings && c.powerUserSettings.default_persona) || c.name1 || '';
+}
+
+let loreLoader = null;
+async function loadLoreApi() {
+    if (loreLoader) return loreLoader;
+    loreLoader = (async () => {
+        try { const mod = await import('../../../world-info.js'); return mod.getSortedEntries || null; }
+        catch (_) { return null; }
+    })();
+    return loreLoader;
+}
+
+export async function loreEntries() {
+    const getSortedEntries = await loadLoreApi();
+    if (!getSortedEntries) return [];
+    try {
+        const entries = await getSortedEntries();
+        return Array.isArray(entries) ? entries : [];
+    } catch (_) { return []; }
+}
+
+let dragLoader = null;
+export async function dragApi() {
+    if (dragLoader) return dragLoader;
+    dragLoader = (async () => {
+        try { const mod = await import('../../../RossAscends-mods.js'); return mod.dragElement || null; }
+        catch (_) { return null; }
+    })();
+    return dragLoader;
+}
+
+export function toast(kind, text) {
+    try {
+        const fn = globalThis.toastr && globalThis.toastr[kind];
+        if (fn) fn(cut(text, 300));
+    } catch (_) {}
+}
+
+export function events() {
+    const c = ctx();
+    return { source: c.eventSource, types: c.eventTypes || c.event_types };
+}

@@ -1,0 +1,110 @@
+<button type="button" id="dr-ball" data-dr-i18n-title="repair.attr.0" data-dr-i18n-aria-label="repair.attr.0">🎬</button>
+<div id="dr-panel" data-theme="day" role="dialog" data-dr-i18n-aria-label="repair.attr.0">
+  <div id="dr-panel-head">
+    <span id="dr-head-l">
+      <div id="dr-head-t"><span data-dr-i18n="plugin.name"></span> <small id="dr-head-v"></small></div>
+    </span>
+    <span class="dr-head-r">
+      <button type="button" class="dr-iconbtn" id="dr-ball-toggle" data-dr-i18n-title="repair.attr.1">📌</button>
+      <button type="button" class="dr-iconbtn" id="dr-theme" data-dr-i18n-title="repair.attr.2">🌙</button>
+      <button type="button" class="dr-iconbtn" id="dr-close" data-dr-i18n-title="repair.attr.3">✕</button>
+    </span>
+  </div>
+  <div id="dr-tabs">
+    <button type="button" class="dr-tab on" data-page="chime"><span data-dr-i18n="repair.label.2"></span></button>
+    <button type="button" class="dr-tab" data-page="coord"><span data-dr-i18n="repair.label.3"></span></button>
+  </div>
+  <div id="dr-panel-body">
+    <div class="dr-page on" id="dr-page-chime">
+      <section class="dr-pane" id="dr-delivery-pane"><div class="dr-delivery-head"><h5 data-dr-i18n="layout.delivery"></h5><button type="button" id="dr-delivery-toggle" role="switch" aria-checked="false" data-dr-i18n-aria-label="delivery.toggle" disabled=""><span aria-hidden="true"></span></button></div>
+        <div class="dr-row mt">
+          <label class="dr-sw"><input type="checkbox" id="dr-pool-use-context"><span data-dr-i18n="pool.useContext"></span></label>
+        </div>
+        <div class="dr-row mt dr-delivery-actions">
+          <button type="button" class="dr-btn" id="dr-draw"><span data-dr-i18n="ui.draw"></span></button>
+          <button type="button" class="dr-btn" id="dr-preview"><span data-dr-i18n="delivery.preview"></span></button>
+        <button type="button" class="dr-btn" id="dr-cancel"><span data-dr-i18n="ui.cancel"></span></button></div>
+        <div class="dr-msg" id="dr-msg1" aria-live="polite"></div>
+        <h5 data-fold="ear"><span data-dr-i18n="repair.label.13"></span><span class="dr-tag" id="dr-stage"></span><span class="dr-caret">▾</span></h5>
+        <div class="dr-fold" data-foldbody="ear">
+          <div class="dr-face" id="dr-face"><span data-dr-i18n="repair.label.14"></span></div>
+          <div class="dr-row mt"><button type="button" class="dr-btn sm" id="dr-close-card"><span data-dr-i18n="ui.retire"></span></button></div><div id="dr-preview-box" hidden=""><h5><span data-dr-i18n="ui.previewResult"></span></h5><div id="dr-preview-cards" class="dr-face"></div></div>
+        </div>
+      </section>
+<section class="dr-pane" id="dr-pool-pane">
+  <h5 data-fold="pool"><span data-dr-i18n="pool.title"></span><span class="dr-caret">▾</span></h5>
+  <div class="dr-fold" data-foldbody="pool">
+    <div class="dr-note" id="dr-pool-summary" aria-live="polite"></div><div id="dr-pool-list-section"><div class="dr-row mt"><button type="button" class="dr-inventory-heading" id="dr-pool-toggle" aria-controls="dr-pool-inventory" aria-expanded="true"><span data-dr-i18n="pool.inventory"></span><svg class="dr-inventory-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 5 7 7-7 7"></path></svg></button></div><div class="dr-note" id="dr-pool-visibility-note" aria-live="polite"></div><div class="dr-fold" id="dr-pool-inventory" data-foldbody="poolinventory"><div class="dr-category-tabs" id="dr-pool-categories" role="group" data-dr-i18n-aria-label="pool.category"><button class="dr-category" type="button" data-pool-category="plot" aria-pressed="true"><span data-dr-i18n="pool.plot"></span><span class="dr-category-count">0</span></button><button class="dr-category" type="button" data-pool-category="emotion" aria-pressed="false"><span data-dr-i18n="pool.emotion"></span><span class="dr-category-count">0</span></button><button class="dr-category" type="button" data-pool-category="nsfw" aria-pressed="false"><span>NSFW</span><span class="dr-category-count">0</span></button><button class="dr-category" type="button" data-pool-category="all" aria-pressed="false"><span data-dr-i18n="pool.allCategories"></span><span class="dr-category-count">0</span></button></div>
+      <label class="dr-field"><span data-dr-i18n="pool.show"></span><select id="dr-pool-view"><option value="available" data-dr-i18n="pool.available"></option><option value="reserved" data-dr-i18n="pool.reserved"></option><option value="used" data-dr-i18n="pool.used"></option><option value="discarded" data-dr-i18n="pool.discarded"></option></select></label>
+      <div id="dr-pool-cards"></div><div class="dr-row"><button type="button" class="dr-btn sm" id="dr-pool-prev" data-dr-i18n="pool.prev"></button><span id="dr-pool-page"></span><button type="button" class="dr-btn sm" id="dr-pool-next" data-dr-i18n="pool.next"></button></div>
+    </div></div><div id="dr-draw-categories"><h5 id="dr-draw-categories-label" data-dr-i18n="pool.drawCategory"></h5><div class="dr-category-options" role="group" aria-labelledby="dr-draw-categories-label"><label class="dr-sw dr-category-all"><input type="checkbox" data-draw-category="auto" id="dr-draw-auto"><span data-dr-i18n="pool.auto"></span></label><label class="dr-sw"><input type="checkbox" data-draw-category="plot" id="dr-draw-plot"><span data-dr-i18n="pool.plot"></span></label><label class="dr-sw"><input type="checkbox" data-draw-category="emotion" id="dr-draw-emotion"><span data-dr-i18n="pool.emotion"></span></label><label class="dr-sw"><input type="checkbox" data-draw-category="nsfw" id="dr-draw-nsfw"><span>NSFW</span></label></div><div class="dr-msg" id="dr-category-msg" aria-live="polite"></div></div>
+    <h5 data-fold="poolsettings"><span data-dr-i18n="pool.settings"></span><span class="dr-caret">▸</span></h5><div class="dr-fold hide" data-foldbody="poolsettings">
+      <div class="dr-g3">
+        <label class="dr-field"><span><input type="checkbox" id="dr-pool-plot-on" data-config="poolPlotOn"> <span data-dr-i18n="pool.plot"></span></span></label>
+        <label class="dr-field"><span><input type="checkbox" id="dr-pool-emotion-on" data-config="poolEmotionOn"> <span data-dr-i18n="pool.emotion"></span></span></label>
+        <label class="dr-field"><span><input type="checkbox" id="dr-pool-nsfw-on" data-config="poolNsfwOn"> NSFW</span></label>
+      </div>
+      <div class="dr-g2"><label class="dr-field"><span data-dr-i18n="pool.total"></span><input type="number" id="dr-pool-total" data-config="poolTotalCount" min="1" max="600" value="200"></label><label class="dr-field"><span data-dr-i18n="pool.timeout"></span><input type="number" id="dr-pool-timeout" data-config="poolTimeout" min="10" max="600" value="300"></label></div>
+      <label class="dr-sw"><input type="checkbox" id="dr-pool-auto" data-config="poolAutoInit"><span data-dr-i18n="pool.autoInit"></span></label>
+      <div class="dr-row mt dr-pool-actions" style="grid-template-columns: 1fr;"><button type="button" class="dr-btn" id="dr-pool-save" data-dr-i18n="pool.save"></button></div>
+    </div><label class="dr-sw"><input type="checkbox" id="dr-pool-consent"><span data-dr-i18n="pool.consent"></span></label>
+    <div class="dr-row mt dr-build-actions"><button type="button" class="dr-btn pri" id="dr-pool-build" data-dr-i18n="pool.build"></button><button type="button" class="dr-btn" id="dr-pool-refill" data-dr-i18n="pool.refill"></button><button type="button" class="dr-btn" id="dr-pool-stop" data-dr-i18n="pool.stop"></button><button type="button" class="dr-btn danger" id="dr-pool-reset" data-dr-i18n="pool.reset"></button></div>
+    <div class="dr-msg" id="dr-pool-msg" aria-live="polite"></div>
+  </div>
+</section>
+    <section class="dr-pane"><h5 data-fold="pace"><span data-dr-i18n="repair.label.17"></span><span class="dr-caret">▸</span></h5><div class="dr-fold hide" data-foldbody="pace"><label class="dr-field" data-pool-only=""><span data-dr-i18n="pool.contextMessages"></span><input type="number" id="dr-pool-context" data-config="poolContextMessages" min="1" max="100" value="6"></label>
+<div class="dr-g3"><label class="dr-field"><span><span data-dr-i18n="repair.label.18"></span></span><input type="number" data-config="chimeN" id="dr-n" min="1" max="50"></label><label class="dr-field" data-dynamic-only=""><span><span data-dr-i18n="repair.label.19"></span></span><input type="number" data-config="chimeCandidates" id="dr-cands" min="2" max="5"></label><label class="dr-field"><span><span data-dr-i18n="repair.label.20"></span></span><input type="number" data-config="chimeInjectCount" id="dr-inject" min="1" max="5"></label></div>
+<div class="dr-g2" data-dynamic-only=""><label class="dr-field"><span><span data-dr-i18n="repair.label.21"></span></span><select id="dr-life" data-config="chimeLifeMode"><option value="half" data-dr-i18n="repair.label.22"></option><option value="once" data-dr-i18n="ui.once"></option><option value="stay" data-dr-i18n="repair.label.24"></option></select></label></div>
+<div class="dr-g2"><label class="dr-field"><span><span data-dr-i18n="ui.chimeTimeout"></span></span><input type="number" id="dr-chime-timeout" data-config="chimeTimeout" min="5" max="120"></label><label class="dr-field"><span><span data-dr-i18n="repair.label.27"></span></span><input type="number" id="dr-prepare-timeout" data-config="prepareTimeout" min="10" max="180"></label></div>
+<button type="button" class="dr-btn pri sm" id="dr-pace-save"><span data-dr-i18n="repair.label.29"></span></button><div class="dr-msg" id="dr-pace-msg"></div></div></section><section class="dr-pane"><h5 data-fold="chimeprompt"><span data-dr-i18n="repair.label.36"></span><span class="dr-caret">▸</span></h5><div class="dr-fold hide" data-foldbody="chimeprompt"><div class="dr-note" data-dr-i18n="prompt.poolScope"></div><label class="dr-field"><textarea id="dr-chime-prompt" data-config="poolPrompt" rows="12" data-dr-i18n-aria-label="repair.label.36"></textarea></label><div class="dr-row"><button type="button" class="dr-btn sm" id="dr-chime-prompt-save"><span data-dr-i18n="repair.label.37"></span></button><button class="dr-btn sm" data-dr-i18n="prompt.default" type="button" id="dr-pool-prompt-default"></button></div><div class="dr-msg" id="dr-prompt-msg"></div></div></section><section class="dr-pane">
+        <h5 data-fold="eyeapi"><span data-dr-i18n="repair.label.30"></span><span class="dr-caret">▸</span></h5>
+        <div class="dr-fold hide" data-foldbody="eyeapi"><label class="dr-field"><span data-dr-i18n="relay.select"></span><div class="dr-api-row"><select id="dr-eye-relay"></select><button type="button" class="dr-btn dr-api-icon" id="dr-eye-relay-new" data-dr-i18n-title="relay.new" data-dr-i18n-aria-label="relay.new">＋</button><button id="dr-eye-relay-edit" type="button" class="dr-btn dr-api-icon" data-dr-i18n-title="relay.edit" data-dr-i18n-aria-label="relay.edit">✎</button><button type="button" class="dr-btn dr-api-icon" id="dr-eye-relay-delete" data-dr-i18n-title="relay.delete" data-dr-i18n-aria-label="relay.delete">🗑</button></div></label><label class="dr-field" id="dr-eye-name-field" hidden=""><span data-dr-i18n="relay.name"></span><input type="text" id="dr-eye-relay-name" maxlength="80" autocomplete="off"></label>
+          <label class="dr-field"><span><span data-dr-i18n="proxy.url"></span></span>
+            <input type="text" id="dr-eye-url" data-config="eyeApiUrl" placeholder="https://relay.example/v1"></label>
+          <label class="dr-field"><span><span data-dr-i18n="proxy.key"></span></span>
+            <input type="password" id="dr-eye-key" data-config="eyeApiKey" placeholder="sk-…"></label>
+          <label class="dr-field"><span><span data-dr-i18n="proxy.model"></span></span>
+            <div class="dr-api-row"><select id="dr-eye-models-select"></select><button id="dr-eye-model-edit" type="button" class="dr-btn dr-api-icon" data-dr-i18n-title="proxy.manual" data-dr-i18n-aria-label="proxy.manual">✎</button></div><input type="text" id="dr-eyemodel" data-config="eyeModel" placeholder="deepseek-chat" hidden="" style="margin-top: 7px;"></label>
+          <div id="dr-eye-models-box" hidden=""><label class="dr-field"><span><span data-dr-i18n="proxy.filter"></span></span><input type="search" id="dr-eye-models-filter" autocomplete="off" data-dr-i18n-aria-label="proxy.filter"></label></div><div class="dr-msg" aria-live="polite" id="dr-eye-models-msg"></div><div class="dr-row"><button type="button" class="dr-btn sm" id="dr-eye-models-fetch"><span data-dr-i18n="proxy.fetch"></span></button><button type="button" class="dr-btn pri sm" id="dr-eye-save"><span data-dr-i18n="repair.label.34"></span></button><button type="button" class="dr-btn sm" id="dr-eye-relay-discard" data-dr-i18n="relay.discard"></button></div>
+          <div class="dr-msg" id="dr-msg4"></div>
+        </div>
+      </section><section id="dr-history-pane" class="dr-pane"><h5 data-fold="hist"><span data-dr-i18n="repair.label.41"></span><span class="dr-caret">▸</span></h5><div class="dr-fold hide" data-foldbody="hist"><div class="dr-hist" id="dr-hist"><span data-dr-i18n="repair.noHistory"></span></div></div></section><section class="dr-pane" id="dr-diagnostics-pane">
+      <h5 data-fold="channel"><span data-dr-i18n="repair.label.38"></span><span class="dr-caret">▸</span></h5><div class="dr-fold hide" data-foldbody="channel"><div class="dr-note" id="dr-channel"></div><div class="dr-msg err" id="dr-config-fault" hidden=""></div><div class="dr-row" id="dr-config-repair-row" hidden=""><button type="button" class="dr-btn danger sm" id="dr-config-repair" data-dr-i18n="relay.repair"></button></div><div class="dr-note"><span data-dr-i18n="repair.label.39"></span></div><code>{{getvar::director_chime_context}}</code><br><code>{{getvar::director_coord_context}}</code><div class="dr-note"><span data-dr-i18n="repair.label.40"></span></div><div class="dr-row mt"><button type="button" class="dr-btn sm" id="dr-check"><span data-dr-i18n="repair.label.10"></span></button><button type="button" class="dr-btn sm" id="dr-resync"><span data-dr-i18n="repair.label.9"></span></button></div></div></section></div>
+    <div class="dr-page" id="dr-page-coord">
+      <section class="dr-pane" id="dr-coord-controls"><h5 data-dr-i18n="layout.coord"></h5>
+        <div class="dr-row">
+          <button type="button" class="dr-btn pri" id="dr-coord-run"><span data-dr-i18n="repair.label.45"></span></button>
+          <label class="dr-sw"><input type="checkbox" id="dr-coord-on"> <span data-dr-i18n="repair.label.5"></span></label>
+        </div>
+        <div class="dr-msg" id="dr-msg3"></div>
+        <h5 data-fold="coordout"><span data-dr-i18n="repair.label.48"></span><span class="dr-caret">▾</span></h5>
+        <div class="dr-fold" data-foldbody="coordout">
+          <div class="dr-face" id="dr-coord-text"><span data-dr-i18n="repair.label.49"></span></div>
+          <div class="dr-row mt"><button type="button" class="dr-btn sm" id="dr-coord-clear"><span data-dr-i18n="repair.label.50"></span></button></div>
+        </div>
+      </section><section class="dr-pane" id="dr-guidance-pane"><h5 data-dr-i18n="layout.requirements"></h5><label class="dr-field"><span><span data-dr-i18n="repair.label.43"></span></span>
+          <input type="text" id="dr-tone" data-dr-i18n-placeholder="repair.attr.4"></label><label class="dr-field"><span><span data-dr-i18n="repair.label.44"></span></span>
+          <textarea id="dr-extra" rows="2" data-dr-i18n-placeholder="repair.attr.5"></textarea></label><div class="dr-row"><button type="button" class="dr-btn sm" id="dr-tone-save"><span data-dr-i18n="ui.saveTone"></span></button><button type="button" class="dr-btn sm" id="dr-extra-save"><span data-dr-i18n="ui.saveExtra"></span></button></div></section>
+    <section class="dr-pane"><h5 data-fold="patrol"><span data-dr-i18n="repair.label.51"></span><span class="dr-caret">▸</span></h5><div class="dr-fold hide" data-foldbody="patrol"><label class="dr-field"><span><span data-dr-i18n="ui.contextRounds"></span></span><input type="number" id="dr-context" data-config="contextRounds" min="2" max="30"></label><label class="dr-sw"><input type="checkbox" id="dr-patrol" data-config="coordPatrol"> <span data-dr-i18n="repair.label.52"></span></label><div class="dr-g2"><label class="dr-field"><span><span data-dr-i18n="repair.label.18"></span></span><input type="number" id="dr-patrol-n" data-config="coordPatrolN" min="1" max="200"></label><label class="dr-field"><span><span data-dr-i18n="ui.coordTimeout"></span></span><input type="number" id="dr-coord-timeout" data-config="coordTimeout" min="5" max="120"></label></div><button type="button" class="dr-btn pri sm" id="dr-patrol-save"><span data-dr-i18n="repair.label.54"></span></button><div class="dr-msg" id="dr-patrol-msg"></div></div></section><section class="dr-pane">
+        <h5 data-fold="preset"><span data-dr-i18n="repair.label.57"></span><span class="dr-caret">▸</span></h5>
+        <div class="dr-fold hide" data-foldbody="preset">
+          <label class="dr-field"><textarea id="dr-preset" data-config="coordPreset" rows="12" data-dr-i18n-aria-label="repair.label.57"></textarea></label>
+          <div class="dr-row">
+            <button type="button" class="dr-btn sm" id="dr-preset-save"><span data-dr-i18n="repair.label.34"></span></button>
+          <button class="dr-btn sm" data-dr-i18n="prompt.default" type="button" id="dr-coord-prompt-default"></button></div>
+        <div class="dr-msg" id="dr-preset-msg" aria-live="polite"></div></div>
+      </section><section class="dr-pane">
+        <h5 data-fold="coordapi"><span data-dr-i18n="repair.label.55"></span><span class="dr-caret">▸</span></h5>
+        <div class="dr-fold hide" data-foldbody="coordapi"><label class="dr-field"><span data-dr-i18n="relay.select"></span><div class="dr-api-row"><select id="dr-coord-relay"></select><button type="button" class="dr-btn dr-api-icon" id="dr-coord-relay-new" data-dr-i18n-title="relay.new" data-dr-i18n-aria-label="relay.new">＋</button><button id="dr-coord-relay-edit" type="button" class="dr-btn dr-api-icon" data-dr-i18n-title="relay.edit" data-dr-i18n-aria-label="relay.edit">✎</button><button type="button" class="dr-btn dr-api-icon" id="dr-coord-relay-delete" data-dr-i18n-title="relay.delete" data-dr-i18n-aria-label="relay.delete">🗑</button></div></label><label class="dr-field" id="dr-coord-name-field" hidden=""><span data-dr-i18n="relay.name"></span><input type="text" id="dr-coord-relay-name" maxlength="80" autocomplete="off"></label><label class="dr-sw"><input type="checkbox" id="dr-reuse" data-config="coordUseEye"> <span data-dr-i18n="repair.label.56"></span></label>
+          <label class="dr-field"><span><span data-dr-i18n="proxy.url"></span></span>
+            <input type="text" id="dr-coord-url" data-config="coordApiUrl" placeholder="https://relay.example/v1"></label>
+          <label class="dr-field"><span><span data-dr-i18n="proxy.key"></span></span>
+            <input type="password" id="dr-coord-key" data-config="coordApiKey" placeholder="sk-…"></label>
+          <label class="dr-field"><span><span data-dr-i18n="proxy.model"></span></span>
+            <div class="dr-api-row"><select id="dr-coord-models-select"></select><button id="dr-coord-model-edit" type="button" class="dr-btn dr-api-icon" data-dr-i18n-title="proxy.manual" data-dr-i18n-aria-label="proxy.manual">✎</button></div><input type="text" id="dr-coordmodel" data-config="coordModel" data-dr-i18n-placeholder="proxy.coordPlaceholder" hidden="" style="margin-top: 7px;"></label>
+          <div id="dr-coord-models-box" hidden=""><label class="dr-field"><span><span data-dr-i18n="proxy.filter"></span></span><input type="search" id="dr-coord-models-filter" autocomplete="off" data-dr-i18n-aria-label="proxy.filter"></label></div><div class="dr-msg" aria-live="polite" id="dr-coord-models-msg"></div><div class="dr-row"><button type="button" class="dr-btn sm" id="dr-coord-models-fetch"><span data-dr-i18n="proxy.fetch"></span></button><button type="button" class="dr-btn pri sm" id="dr-coord-save"><span data-dr-i18n="repair.label.34"></span></button><button type="button" class="dr-btn sm" id="dr-coord-relay-discard" data-dr-i18n="relay.discard"></button></div>
+          <div class="dr-msg" id="dr-msg5"></div>
+        </div>
+      </section></div>
+  </div>
+<dialog id="dr-reset-dialog" role="alertdialog" aria-modal="true" aria-labelledby="dr-reset-title" aria-describedby="dr-reset-description"><h3 id="dr-reset-title" data-dr-i18n="pool.resetTitle"></h3><p id="dr-reset-description" data-dr-i18n="pool.resetPrompt"></p><div class="dr-reset-actions"><button type="button" class="dr-btn" id="dr-reset-cancel" data-dr-i18n="pool.resetCancel" autofocus=""></button><button type="button" class="dr-btn danger" id="dr-reset-accept" data-dr-i18n="pool.resetAccept"></button></div></dialog></div>
