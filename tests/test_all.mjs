@@ -126,6 +126,12 @@ async function runTurn(env, type, opts) {
     T.eq('深度 = 2', chime.depth, 2);
     T.eq('角色 = SYSTEM(0)', chime.role, 0);
     T.ok('注入带「尚未发生」免责', /候选事件，尚未发生/.test(chime.value));
+    // 她的疑问：会不会写进楼层。注入只进「发给模型的请求」，聊天记录必须一个字都不动
+    T.eq('聊天楼层数没变', env.ctx.chat.length, 3);
+    T.eq('楼层正文没被改写', env.ctx.chat.map(m => m.mes), ['他抬头看了你一眼。', '我把伞收起来。', '“雨还没停。”']);
+    T.ok('没有任何楼层含纸条文本', !env.ctx.chat.some(m => m.mes.indexOf('寄错的信') >= 0));
+    T.ok('没有新增隐藏楼或系统楼', env.ctx.chat.filter(m => m.is_system).length === 0);
+    T.ok('注入只存在注入表里', Object.keys(env.injections).indexOf('baobaodai_chime') >= 0);
     await env.engine.app.closeCard(false);
     T.eq('撤下候选后注入清空', env.injections['baobaodai_chime'].value, '');
     await env.emitter.emit(TYPES.CHAT_CHANGED, null);
