@@ -34,6 +34,23 @@ export function userMsg(text) { return { name: 'User', is_user: true, is_system:
 export function botMsg(text, name) { return { name: name || 'Char', is_user: false, is_system: false, mes: text, send_date: Date.now() }; }
 export function hiddenMsg(text) { return { name: 'Char', is_user: false, is_system: true, mes: text, send_date: Date.now() }; }
 
+export const BOTH_ENTRIES = [
+    { name: '创意空投机 · 系统变量', content: '{{getvar::director_chime_context}}' },
+    { name: '场外小叮当 · 系统变量', content: '{{getvar::director_coord_context}}' },
+];
+
+// 仿酒馆 oai_settings：条目定义在 prompts，启用状态在全局排序表 character_id=100001
+export function presetWith(entries) {
+    const prompts = [{ identifier: 'main', name: 'Main Prompt', role: 'system', content: '主提示', system_prompt: true }];
+    const order = [{ identifier: 'main', enabled: true }, { identifier: 'chatHistory', enabled: true }];
+    entries.forEach((e, i) => {
+        const id = 'bbd-' + i;
+        prompts.push({ identifier: id, name: e.name || id, role: e.role || 'system', content: e.content, injection_position: e.absolute ? 1 : 0, injection_depth: 4 });
+        order.push({ identifier: id, enabled: e.enabled !== false });
+    });
+    return { preset_settings_openai: '如梦织境', prompts, prompt_order: [{ character_id: 100000, order: [] }, { character_id: 100001, order }] };
+}
+
 export function setupDom(html) {
     const dom = new JSDOM(html || '<!DOCTYPE html><html><body><div id="extensions_settings"></div><div id="extensions_settings2"></div><form id="send_form"></form></body></html>', {
         url: 'http://localhost:8000/scripts/extensions/third-party/baobaodai-st/',
@@ -74,6 +91,8 @@ export function createContext(init) {
         eventSource: emitter,
         eventTypes: TYPES,
         extensionPrompts: injections,
+        mainApi: init.mainApi || 'openai',
+        chatCompletionSettings: init.preset || presetWith(BOTH_ENTRIES),
         getCurrentChatId: () => ctx.chatId,
         saveSettingsDebounced: () => { stats.settings++; },
         saveMetadataDebounced: () => { stats.metadata++; },

@@ -1,5 +1,5 @@
 const NS = 'baobaodai';
-const IN_CHAT = 1, IN_PROMPT = 0, ROLE_SYSTEM = 0;
+const PRESET_ORDER_ID = '100001';
 
 export function ctx() {
     const st = globalThis.SillyTavern;
@@ -114,15 +114,40 @@ export function groundingSignature(m) {
     return JSON.stringify([m.role, m.name, m.narrative]);
 }
 
-export function inject(key, text, depth, atPrompt) {
+// {{getvar::}} 读的就是 chat_metadata.variables
+export function getChatVar(name) {
     const c = ctx();
-    const value = String(text || '');
-    const position = atPrompt ? IN_PROMPT : IN_CHAT;
-    c.setExtensionPrompt(key, value, position, Math.max(0, Number(depth) || 0), false, ROLE_SYSTEM);
+    const vars = c.chatMetadata && c.chatMetadata.variables;
+    const v = vars ? vars[name] : undefined;
+    return v == null ? '' : String(v);
 }
 
-export function clearInject(key) {
-    try { ctx().setExtensionPrompt(key, '', IN_CHAT, 0, false, ROLE_SYSTEM); } catch (_) {}
+export function setChatVar(name, value) {
+    const c = ctx();
+    if (!c.chatMetadata) throw Error('当前没有打开的聊天');
+    if (!c.chatMetadata.variables || typeof c.chatMetadata.variables !== 'object') c.chatMetadata.variables = {};
+    c.chatMetadata.variables[name] = String(value || '');
+    c.saveMetadataDebounced();
+}
+
+// 当前对话补全预设里的条目，启用状态取全局排序表；非对话补全模式返回 null
+export function presetEntries() {
+    const c = ctx();
+    if (c.mainApi !== 'openai') return null;
+    const s = c.chatCompletionSettings || {};
+    const prompts = Array.isArray(s.prompts) ? s.prompts : [];
+    const list = (Array.isArray(s.prompt_order) ? s.prompt_order : []).find(x => x && String(x.character_id) === PRESET_ORDER_ID);
+    const order = list && Array.isArray(list.order) ? list.order : [];
+    return order.map(entry => {
+        const p = prompts.find(x => x && x.identifier === entry.identifier);
+        if (!p) return null;
+        return { name: String(p.name || ''), role: p.role || 'system', content: String(p.content || ''), enabled: !!entry.enabled };
+    }).filter(Boolean);
+}
+
+export function presetName() {
+    const s = ctx().chatCompletionSettings || {};
+    return String(s.preset_settings_openai || '');
 }
 
 export function substitute(text) {

@@ -2,7 +2,7 @@ import * as H from './host.js';
 import { config, loadCfg, apiConfig, saveCfg, saveRelay, selectRelay, removeRelay, repairRelays, setConfigHooks, getDefaultPrompts, faultText } from './config.js';
 import {
     jobs, epoch, bumpEpoch, readState, change, guard, startJob, stop, cancelAll, notify, busy,
-    archiveActive, localEdit, lifecycle, setDiagnostic, getDiagnostic, clearInjection, applyInjection,
+    archiveActive, localEdit, lifecycle, setDiagnostic, getDiagnostic, syncVars, CHIME_VAR, COORD_VAR,
     poolOf,
 } from './state.js';
 import { buildContext } from './context.js';
@@ -79,7 +79,9 @@ async function pipeline(event, job) {
     loadCfg(); await guard(job);
     const ms = H.messages(), anchor = H.anchorOf(ms);
     if (!config.chimeEnabled && !config.coordEnabled) return;
-    const chime = config.chimeEnabled, coord = config.coordEnabled;
+    const checked = checkChannels();
+    if (!checked.chime && !checked.coord) throw Error(checked.reason);
+    const chime = checked.chime, coord = checked.coord;
     let s = readState();
     await validatePoolSource(job, ms);
     await bindPool(job);
@@ -149,6 +151,10 @@ async function manual(kind, fn) {
             timer = setTimeout(() => { stop(j); reject(Error('百宝袋任务超时')); }, config.prepareTimeout * 1000);
         });
         return await Promise.race([(async () => {
+            const check = checkChannels();
+            const needs = kind === 'coord' ? 'coord' : (kind === 'draw' || kind === 'preview') ? 'chime' : null;
+            const enabled = needs === 'coord' ? config.coordEnabled : config.chimeEnabled;
+            if (needs && enabled && !check[needs]) throw Error(check.reason);
             const ms = H.messages();
             let round = H.assistantRound(ms);
             if (kind !== 'preview') round = await lifecycle(ms, j);
@@ -160,26 +166,30 @@ async function manual(kind, fn) {
     } finally { clearTimeout(timer); if (j) { stop(j); jobs.delete(j); } notify(); }
 }
 
-function channelStatus() {
-    const chime = apiConfig('chime'), coord = apiConfig('coord');
-    const notes = [];
-    if (config.chimeEnabled && !(chime.url && chime.model)) notes.push('创意空投机：中转站地址或模型未配置');
-    if (config.coordEnabled && !(coord.url && coord.model)) notes.push('场外小叮当：中转站地址或模型未配置');
-    const route = chime.url && !directAvailable(chime.url) ? '请求经酒馆后端转发' : '请求优先直连，被拦则自动转发';
+// 两个模块各判各的：缺调度条目不能拖垮接好的空投
+function checkChannels() {
+    const entries = H.presetEntries();
+    if (!entries) return { ok: false, chime: false, coord: false, reason: '需要对话补全（Chat Completion）预设；当前接口模式读不到预设条目' };
+    const judge = (variable, enabled) => {
+        if (!enabled) return { ok: true, live: false, note: '' };
+        const hit = entries.some(e => e.enabled && e.role === 'system' && e.content.indexOf('{{getvar::' + variable + '}}') >= 0);
+        return hit ? { ok: true, live: true, note: '' } : { ok: false, live: false, note: variable + '：预设缺少已启用的 system 条目' };
+    };
+    const chime = judge(CHIME_VAR, config.chimeEnabled), coord = judge(COORD_VAR, config.coordEnabled);
+    const notes = [chime.note, coord.note].filter(Boolean);
+    const conn = apiConfig('chime');
+    const route = conn.url && !directAvailable(conn.url) ? '请求经酒馆后端转发' : '请求优先直连，被拦则自动转发';
+    const name = H.presetName();
     return {
-        ok: !notes.length,
-        chime: config.chimeEnabled && !!(chime.url && chime.model),
-        coord: config.coordEnabled && !!(coord.url && coord.model),
-        reason: notes.length ? notes.join('；') : '注入走酒馆原生接口，不需要在预设里加条目 · ' + route,
+        ok: chime.ok && coord.ok, chime: chime.live, coord: coord.live,
+        reason: notes.length ? notes.join('；') : '预设' + (name ? '「' + name + '」' : '') + '条目检查通过 · ' + route,
     };
 }
 
 export function snapshot() {
-    const key = H.chatKey();
-    const s = key ? readState() : readState();
     return {
-        version: VERSION, cfg: H.clone(config), state: s, chatId: key,
-        channels: channelStatus(), diagnostic: getDiagnostic(), configFault: faultText(), busy: busy(),
+        version: VERSION, cfg: H.clone(config), state: readState(), chatId: H.chatKey(),
+        channels: checkChannels(), diagnostic: getDiagnostic(), configFault: faultText(), busy: busy(),
     };
 }
 
@@ -187,7 +197,7 @@ export async function boot() {
     try {
         loadCfg();
         const key = H.chatKey();
-        if (!key) { clearInjection(); notify(); return; }
+        if (!key) { notify(); return; }
         const j = { chatId: key, epoch, deadline: Date.now() + 15000 };
         const ms = H.messages();
         await validatePoolSource(j, ms);
@@ -205,11 +215,11 @@ export function reboot() { bootPromise = boot(); return bootPromise; }
 export function ready() { return bootPromise; }
 
 export function onChatClosed() {
-    bumpEpoch(); cancelAll(); clearInjection(); notify();
+    bumpEpoch(); cancelAll(); notify();
 }
 
 export function onChatChanged() {
-    bumpEpoch(); cancelAll(); prepared.clear(); terminal.clear(); clearInjection(); reboot();
+    bumpEpoch(); cancelAll(); prepared.clear(); terminal.clear(); reboot();
 }
 
 // 编辑/删除正文让旧调度失效；回合计数不动（重生成就是先删一楼，清零会让自动空投永远不投）
@@ -226,7 +236,7 @@ setConfigHooks({
     notify,
     afterCommit: async () => {
         try { await localEdit(s => { retireOutOfScopeCards(s); }); }
-        catch (_) { applyInjection(readState()); }
+        catch (_) { try { syncVars(readState()); } catch (__) {} }
     },
 });
 

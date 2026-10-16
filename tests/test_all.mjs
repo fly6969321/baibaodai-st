@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { setupDom, createContext, installFetch, makeRunner, userMsg, botMsg, hiddenMsg, TYPES, Emitter } from './harness.mjs';
+import { setupDom, createContext, installFetch, makeRunner, userMsg, botMsg, hiddenMsg, TYPES, Emitter, presetWith, BOTH_ENTRIES } from './harness.mjs';
 
 const EXT = process.argv[2];
 if (!EXT) { console.error('用法: node test_all.mjs <扩展目录绝对路径>'); process.exit(2); }
@@ -34,6 +34,8 @@ function pooledState(extra) {
     }, extra || {});
 }
 
+function vars(env) { return env.ctx.chatMetadata.variables || {}; }
+
 function baseChat() {
     return [botMsg('他抬头看了你一眼。'), userMsg('我把伞收起来。'), botMsg('“雨还没停。”')];
 }
@@ -44,7 +46,7 @@ async function boot(options) {
     const chatId = 'chat-' + (++chatSeq);
     const h = createContext({
         chat: options.chat || baseChat(), chatMetadata: options.meta || {}, extensionSettings: {},
-        chatId, emitter: BUS, injections: INJECTIONS,
+        chatId, emitter: BUS, injections: INJECTIONS, preset: options.preset, mainApi: options.mainApi,
     });
     h.ctx.extensionSettings.baobaodai = relayCfg(options.cfg);
     if (options.state) h.ctx.chatMetadata.baobaodai = options.state;
@@ -114,51 +116,33 @@ async function runTurn(env, type, opts) {
     T.ok('酒馆扩展区入口已加', !!document.getElementById('dr-entry-open'));
     const snap = await env.engine.snapshot();
     T.ok('快照可取', !!snap && snap.version === '0.5.16');
-    T.ok('诊断里说明不用改预设', /不需要在预设里加条目/.test(snap.channels.reason));
+    T.ok('诊断显示预设条目检查通过', /预设「如梦织境」条目检查通过/.test(snap.channels.reason), snap.channels.reason);
     document.getElementById('dr-ball').dispatchEvent(new globalThis.window.Event('click'));
     T.ok('点浮标能打开面板', document.getElementById('dr-panel').classList.contains('show'));
-    await waitFor(() => document.getElementById('dr-chime-depth').value === '2');
-    T.eq('空投注入深度框显示生效值', document.getElementById('dr-chime-depth').value, '2');
-    T.eq('调度注入深度框显示生效值', document.getElementById('dr-coord-depth').value, '2');
-    const depthBox = document.getElementById('dr-chime-depth');
-    depthBox.value = '0';
-    depthBox.dispatchEvent(new globalThis.window.Event('input'));
-    document.getElementById('dr-pace-save').dispatchEvent(new globalThis.window.Event('click'));
-    await waitFor(() => env.cfg.config.chimeDepth === 0);
-    T.eq('改空投深度后配置生效', env.cfg.config.chimeDepth, 0);
-    T.eq('空投注入立刻按新深度', env.injections['baobaodai_chime'].depth, 0);
-    const coordBox = document.getElementById('dr-coord-depth');
-    coordBox.value = '6';
-    coordBox.dispatchEvent(new globalThis.window.Event('input'));
-    document.getElementById('dr-patrol-save').dispatchEvent(new globalThis.window.Event('click'));
-    await waitFor(() => env.cfg.config.coordDepth === 6);
-    T.eq('改调度深度后配置生效', env.cfg.config.coordDepth, 6);
-    T.eq('调度注入立刻按新深度', env.injections['baobaodai_coord'].depth, 6);
+    T.ok('面板没有注入深度框', !document.getElementById('dr-chime-depth') && !document.getElementById('dr-coord-depth'));
+    T.ok('诊断区给出两条要粘的条目', /director_chime_context/.test(document.getElementById('dr-diagnostics-pane').textContent) && /director_coord_context/.test(document.getElementById('dr-diagnostics-pane').textContent));
 }
 
 // ── 2. 注入（替代预设通道）────────────────────────────────────────
 {
     const state = pooledState({ activeCards: [{ id: 'p-1', title: '', hook: '寄错的信，称呼却很熟悉', category: 'plot' }], floatStage: 'active', floatAt: 3 });
     const env = await boot({ state });
-    T.group('原生注入');
-    await env.engine.app.refresh();
+    T.group('预设变量注入');
     await env.state.localEdit(() => {});
-    const chime = env.injections['baobaodai_chime'];
-    T.ok('空投内容已注入', chime && chime.value.indexOf('寄错的信') >= 0);
-    T.eq('位置 = IN_CHAT(1)', chime.position, 1);
-    T.eq('深度 = 2', chime.depth, 2);
-    T.eq('角色 = SYSTEM(0)', chime.role, 0);
-    T.ok('注入带「尚未发生」免责', /候选事件，尚未发生/.test(chime.value));
-    // 她的疑问：会不会写进楼层。注入只进「发给模型的请求」，聊天记录必须一个字都不动
+    const chime = vars(env).director_chime_context || '';
+    T.ok('纸条写进聊天变量 director_chime_context', chime.indexOf('寄错的信') >= 0, chime);
+    T.ok('带「尚未发生」免责', /候选事件，尚未发生/.test(chime));
+    T.ok('不经酒馆原生注入', Object.keys(env.injections).length === 0, Object.keys(env.injections).join(','));
+    // 她的疑问：会不会写进楼层。变量只经预设条目进请求，聊天记录必须一个字都不动
     T.eq('聊天楼层数没变', env.ctx.chat.length, 3);
     T.eq('楼层正文没被改写', env.ctx.chat.map(m => m.mes), ['他抬头看了你一眼。', '我把伞收起来。', '“雨还没停。”']);
     T.ok('没有任何楼层含纸条文本', !env.ctx.chat.some(m => m.mes.indexOf('寄错的信') >= 0));
     T.ok('没有新增隐藏楼或系统楼', env.ctx.chat.filter(m => m.is_system).length === 0);
-    T.ok('注入只存在注入表里', Object.keys(env.injections).indexOf('baobaodai_chime') >= 0);
+    const saves = env.stats.metadata;
+    await env.state.localEdit(() => {});
+    T.eq('内容没变就不重复存盘', env.stats.metadata, saves);
     await env.engine.app.closeCard(false);
-    T.eq('撤下候选后注入清空', env.injections['baobaodai_chime'].value, '');
-    await env.emitter.emit(TYPES.CHAT_CHANGED, null);
-    T.eq('关闭聊天清空注入', env.injections['baobaodai_chime'].value, '');
+    T.eq('撤下候选后变量清空', vars(env).director_chime_context, '');
 }
 
 // ── 3. 重生成不清零回合计数（0.5.15 根因一）──────────────────────
@@ -217,7 +201,7 @@ async function runTurn(env, type, opts) {
     T.eq('盲抽不调用任何 API', globalThis.fetch.calls.filter(c => c.url.indexOf('completions') >= 0).length, 0);
     const s = env.state.readState();
     T.eq('抽出的纸条转为预留', s.pool.cards.filter(c => c.status === 'reserved').length, 2);
-    T.ok('注入里出现剧情纸条', /剧情纸条/.test(env.injections['baobaodai_chime'].value));
+    T.ok('变量里出现剧情纸条', /剧情纸条/.test(vars(env).director_chime_context || ''));
 }
 
 // ── 6. 投放范围变更会撤下范围外的在场纸条 ───────────────────────
@@ -425,7 +409,8 @@ async function runTurn(env, type, opts) {
     T.eq('新聊天没有旧纸条', s.activeCards.length, 0);
     T.eq('新聊天卡池是空的', (s.pool.cards || []).length, 0);
     T.ok('旧聊天的数据还在原处', ((metaA.baobaodai || {}).activeCards || []).length === 1);
-    T.eq('注入已按新聊天重算', env.injections['baobaodai_chime'].value, '');
+    T.eq('新聊天变量里没有旧纸条', vars(env).director_chime_context || '', '');
+    T.ok('旧聊天的变量原样保留', /A 聊天的纸条/.test((metaA.variables || {}).director_chime_context || ''));
 }
 
 // ── 18. 场外小叮当 ────────────────────────────────────────────
@@ -434,16 +419,22 @@ async function runTurn(env, type, opts) {
     T.group('场外小叮当');
     const r = await env.engine.app.runCoordinator('让冷板凳的老周重新出场');
     T.ok('调度成功', r.ok, r.reason);
-    T.ok('调度文本已注入', /老周/.test(env.injections['baobaodai_coord'].value));
-    T.ok('注入带不可当事实的免责', /执行建议而非已发生事实/.test(env.injections['baobaodai_coord'].value));
+    T.ok('调度写进 director_coord_context', /老周/.test(vars(env).director_coord_context || ''));
+    T.ok('调度带不可当事实的免责', /执行建议而非已发生事实/.test(vars(env).director_coord_context || ''));
     T.eq('一次性补充用后清空', env.state.readState().coordExtra, '');
     T.ok('留了调度记录', env.state.readState().coordLog.length === 1);
     await env.engine.app.clearCoord();
-    T.eq('清空调度后注入也清掉', env.injections['baobaodai_coord'].value, '');
+    T.eq('清空调度后变量也清掉', vars(env).director_coord_context, '');
 
     const env2 = await boot({ cfg: { coordEnabled: false } });
     const r2 = await env2.engine.app.runCoordinator('x');
     T.ok('关掉就不调度', !r2.ok && /已关闭/.test(r2.reason), r2.reason);
+    T.ok('关着时报「已关闭」而不是检查通过', !/检查通过/.test(r2.reason), r2.reason);
+    const env3 = await boot({ cfg: { chimeEnabled: false }, state: pooledState({ lastDrawAt: 0 }) });
+    const r3 = await env3.engine.app.drawNow();
+    T.ok('投放关着时手动抽报已关闭', !r3.ok && /已关闭/.test(r3.reason), r3.reason);
+    const r4 = await env3.engine.app.previewDraw();
+    T.ok('投放关着仍可试抽（不投放）', r4.ok && r4.cards.length > 0, r4.reason);
 }
 
 // ── 19. 试抽不扣卡 ────────────────────────────────────────────
@@ -468,6 +459,58 @@ async function runTurn(env, type, opts) {
     T.ok('清空要确认', (await env.engine.app.resetPool(false)).ok === false);
     await env.engine.app.resetPool(true, env.host.chatKey());
     T.eq('清空后卡池为空', env.state.readState().pool.cards.length, 0);
+}
+
+// ── 21. 预设条目检查 ─────────────────────────────────────────
+{
+    const env = await boot({ cfg: { chimeN: 1, poolUseContext: true }, state: pooledState({ lastDrawAt: 0 }), preset: presetWith([BOTH_ENTRIES[1]]) });
+    T.group('预设条目检查');
+    await runTurn(env, 'normal');
+    T.eq('缺空投条目：一次 API 都不发', globalThis.fetch.calls.length, 0);
+    T.eq('缺空投条目：一张卡都不动', env.state.readState().pool.cards.filter(c => c.status !== 'available').length, 0);
+    T.ok('诊断点名缺哪条', /director_chime_context：预设缺少已启用的 system 条目/.test(env.engine.snapshot().channels.reason), env.engine.snapshot().channels.reason);
+    const r = await env.engine.app.drawNow();
+    T.ok('手动抽卡也拦住', !r.ok && /director_chime_context/.test(r.reason), r.reason);
+    const p = await env.engine.app.previewDraw();
+    T.ok('试抽也拦住', !p.ok && /director_chime_context/.test(p.reason), p.reason);
+}
+{
+    const env = await boot({ cfg: { chimeN: 1 }, state: pooledState({ lastDrawAt: 0 }), preset: presetWith([{ content: '{{getvar::director_chime_context}}', enabled: false }, BOTH_ENTRIES[1]]) });
+    await runTurn(env, 'normal');
+    T.eq('条目关着算缺', env.state.readState().history.length, 0);
+}
+{
+    const env = await boot({ cfg: { chimeN: 1 }, state: pooledState({ lastDrawAt: 0 }), preset: presetWith([{ content: '{{getvar::director_chime_context}}', role: 'user' }, BOTH_ENTRIES[1]]) });
+    await runTurn(env, 'normal');
+    T.eq('不是 system 角色算缺', env.state.readState().history.length, 0);
+}
+{
+    const env = await boot({ cfg: { chimeN: 1 }, state: pooledState({ lastDrawAt: 0 }), preset: presetWith([]) });
+    await runTurn(env, 'normal');
+    T.eq('两条都缺：不投', env.state.readState().history.length, 0);
+    T.ok('两条都缺：记下原因', /director_chime_context/.test(env.engine.snapshot().diagnostic), env.engine.snapshot().diagnostic);
+}
+{
+    const env = await boot({ cfg: { chimeN: 1 }, state: pooledState({ lastDrawAt: 0 }), preset: presetWith([BOTH_ENTRIES[0]]) });
+    await runTurn(env, 'normal');
+    T.ok('只缺调度条目时空投照常', env.state.readState().history.length > 0);
+    const r = await env.engine.app.runCoordinator('x');
+    T.ok('调度被拦并点名', !r.ok && /director_coord_context/.test(r.reason), r.reason);
+}
+{
+    const env = await boot({ cfg: { coordEnabled: false }, preset: presetWith([BOTH_ENTRIES[0]]) });
+    T.ok('关掉调度就不要求调度条目', env.engine.snapshot().channels.ok, env.engine.snapshot().channels.reason);
+}
+{
+    const env = await boot({ cfg: { chimeN: 1 }, state: pooledState({ lastDrawAt: 0 }), preset: presetWith([{ content: '【幕后】\n{{getvar::director_chime_context}}\n（以上仅供参考）', absolute: true }, BOTH_ENTRIES[1]]) });
+    await runTurn(env, 'normal');
+    T.ok('条目里有别的文字、放聊天内深度也认', env.state.readState().history.length > 0);
+}
+{
+    const env = await boot({ cfg: { chimeN: 1 }, state: pooledState({ lastDrawAt: 0 }), mainApi: 'textgenerationwebui' });
+    await runTurn(env, 'normal');
+    T.eq('文本补全模式不投', env.state.readState().history.length, 0);
+    T.ok('诊断说明要对话补全预设', /对话补全/.test(env.engine.snapshot().channels.reason));
 }
 
 process.exit(T.report('百宝袋酒馆版 · 回归测试') ? 1 : 0);

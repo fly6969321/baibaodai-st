@@ -12,7 +12,6 @@ export const DEFAULTS = {
     coordEnabled: true, coordPatrol: false, coordPatrolN: 20,
     coordTimeout: 45, prepareTimeout: 80,
     coordPreset: COORD_PROMPT,
-    chimeDepth: 2, coordDepth: 2,
     eyeApiUrl: '', eyeApiKey: '', eyeModel: 'deepseek-chat',
     coordApiUrl: '', coordApiKey: '', coordModel: '', coordUseEye: true,
 };
@@ -34,7 +33,6 @@ export function normalizeCfg(raw) {
     c.coordPatrolN = int(c.coordPatrolN, 20, 1, 200); c.contextRounds = int(c.contextRounds, 8, 2, 30);
     c.chimeTimeout = int(c.chimeTimeout, 35, 5, 120); c.coordTimeout = int(c.coordTimeout, 45, 5, 120);
     c.prepareTimeout = int(c.prepareTimeout, 80, 10, 180);
-    c.chimeDepth = int(c.chimeDepth, 2, 0, 100); c.coordDepth = int(c.coordDepth, 2, 0, 100);
     if (['half', 'once', 'stay'].indexOf(c.chimeLifeMode) < 0) c.chimeLifeMode = 'half';
     ['eyeApiUrl', 'eyeApiKey', 'eyeModel', 'coordApiUrl', 'coordApiKey', 'coordModel'].forEach(k => { c[k] = String(c[k] || '').trim(); });
     c.chimePrompt = String(c.chimePrompt || CHIME_PROMPT);

@@ -1,8 +1,8 @@
 import * as H from './host.js';
 import { config, apiConfig, savingCount } from './config.js';
 
-export const CHIME_KEY = 'baobaodai_chime';
-export const COORD_KEY = 'baobaodai_coord';
+export const CHIME_VAR = 'director_chime_context';
+export const COORD_VAR = 'director_coord_context';
 
 export let epoch = 0;
 export const jobs = new Set();
@@ -78,14 +78,11 @@ export function coordText(s) {
     return '【幕后场外小叮当｜执行建议而非已发生事实】\n不展示此调度，不替用户做决定；不得覆盖既有设定与用户选择。\n' + H.safeText(s.coordText, 1200);
 }
 
-export function applyInjection(s) {
-    H.inject(CHIME_KEY, chimeText(s), config.chimeDepth);
-    H.inject(COORD_KEY, coordText(s), config.coordDepth);
-}
-
-export function clearInjection() {
-    H.clearInject(CHIME_KEY);
-    H.clearInject(COORD_KEY);
+// 值没变不写，免得每次刷新都触发一次聊天存盘
+export function syncVars(s) {
+    [[CHIME_VAR, chimeText(s)], [COORD_VAR, coordText(s)]].forEach(([name, text]) => {
+        if (H.getChatVar(name) !== text) H.setChatVar(name, text);
+    });
 }
 
 // revision 兼作抽卡的乐观锁；没有真实变化时不能 bump，否则会把正在跑的抽卡判成「状态已变化」白跳一轮
@@ -113,11 +110,11 @@ export async function guard(job) {
 export async function writeState(next, old, job) {
     await guard(job);
     if (sameState(next, old)) {
-        next.revision = old.revision || 0; applyInjection(next); notify(); return next;
+        next.revision = old.revision || 0; syncVars(next); notify(); return next;
     }
     next.revision = (old.revision || 0) + 1;
     H.writeRawState(next);
-    applyInjection(next);
+    syncVars(next);
     notify();
     return next;
 }
