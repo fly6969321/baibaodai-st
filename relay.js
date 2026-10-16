@@ -56,12 +56,26 @@ function isNetworkError(e) {
 
 function parseChoice(data, allowPartial) {
     const choice = data && data.choices && data.choices[0];
-    const truncated = !!(choice && choice.finish_reason === 'length');
+    const message = (choice && choice.message) || {};
+    const finishReason = String((choice && choice.finish_reason) || '');
+    const truncated = finishReason === 'length';
     if (truncated && !allowPartial) throw Error('百宝袋输出被截断，请调整模型或提示词');
-    let content = choice && choice.message && choice.message.content;
+    let content = message.content;
     if (Array.isArray(content)) content = content.filter(x => x && x.type === 'text').map(x => x.text).join('\n');
-    if (typeof content !== 'string' || !content.trim()) throw Error('百宝袋 API 未返回正文（不把 reasoning_content 当作正文）');
-    return { content: allowPartial ? content : content.trim(), truncated };
+    if (typeof content === 'string' && content.trim()) {
+        return { content: allowPartial ? content : content.trim(), truncated, fromReasoning: false, finishReason };
+    }
+    // 推理类模型、以及部分中转站会把正文放进推理字段、把 content 留空。
+    // 这里退回使用它 —— 调用方的格式校验照旧执行，思考过程里的杂质会被过滤掉。
+    const reasoning = message.reasoning_content || message.reasoning;
+    if (typeof reasoning === 'string' && reasoning.trim()) {
+        return { content: allowPartial ? reasoning : reasoning.trim(), truncated, fromReasoning: true, finishReason };
+    }
+    const detail = [];
+    if (finishReason) detail.push('finish_reason=' + finishReason);
+    const keys = Object.keys(message).filter(k => message[k] != null && message[k] !== '');
+    if (keys.length) detail.push('返回字段=' + keys.join('/'));
+    throw Error('百宝袋 API 没返回可用内容' + (detail.length ? '（' + detail.join('，') + '）' : '') + '；换个模型再试');
 }
 
 async function readError(res) {

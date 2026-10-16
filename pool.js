@@ -115,11 +115,12 @@ export async function buildPool(options) {
                 });
                 p.updatedAt = Date.now(); p.status = remaining ? 'partial' : 'ready';
                 p.error = remaining ? '还差 ' + remaining + ' 条；无效、重复或超长条目未入池。再次点击才会付费补齐。' : '';
-                p.lastBuild = { requested, accepted: cards.length, truncated: !!reply.truncated, calls: 1 };
+                p.lastBuild = { requested, accepted: cards.length, truncated: !!reply.truncated, fromReasoning: !!reply.fromReasoning, calls: 1 };
             }, j);
             return {
                 ok: true, partial: remaining > 0, accepted: cards.length, remaining,
-                reason: '本次一次 API 请求，收录 ' + cards.length + ' 条。' + (remaining ? '还差 ' + remaining + ' 条，未自动重试。' : '卡池已建好。'),
+                reason: '本次一次 API 请求，收录 ' + cards.length + ' 条。' + (reply.fromReasoning ? '（取自模型的推理字段）' : '')
+                    + (remaining ? '还差 ' + remaining + ' 条，未自动重试。' : '卡池已建好。'),
             };
         })();
         return await Promise.race([work, j.cancelPromise]);

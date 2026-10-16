@@ -18,10 +18,15 @@ export const VERSION = '0.5.16';
 const prepared = new Map(), terminal = new Set();
 let bootPromise = null;
 
-function parseCards(raw, s) {
+function parseCards(raw, s, fromReasoning) {
     const text = raw.trim().replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/, '');
     let data;
-    try { data = JSON.parse(text); } catch (_) { throw Error('创意空投机响应不是有效剧情 JSON，未投放'); }
+    try { data = JSON.parse(text); } catch (_) {
+        // 推理字段里常混着思考过程，把 JSON 块剥出来再试一次
+        const start = fromReasoning ? text.indexOf('{') : -1, end = fromReasoning ? text.lastIndexOf('}') : -1;
+        if (start >= 0 && end > start) { try { data = JSON.parse(text.slice(start, end + 1)); } catch (_) {} }
+        if (!data) throw Error('创意空投机响应不是有效剧情 JSON，未投放');
+    }
     if (!data || typeof data.intervene !== 'boolean' || !Array.isArray(data.cards)) throw Error('剧情 JSON 结构不完整，未投放');
     if (!data.intervene) return { cards: [], reason: H.safeText(data.reason || '当前场景无需介入', 240) };
     const seen = new Set();
@@ -43,7 +48,7 @@ async function draw(s, round, ms, job, preview) {
     let body = await buildContext(job, ms, s, false);
     body += '\n\n请生成 ' + config.chimeCandidates + ' 条不同方向的候选；无法贴合时返回不介入。';
     const reply = await ask(job, 'chime', config.chimePrompt, body, {});
-    const result = parseCards(reply.content, s);
+    const result = parseCards(reply.content, s, reply.fromReasoning);
     if (preview) return { ok: true, preview: true, cards: result.cards, reason: result.reason };
     await change(next => {
         if (next.revision !== s.revision) throw Error('剧情生成期间状态已变化，未覆盖新状态');

@@ -525,4 +525,49 @@ async function runTurn(env, type, opts) {
     T.ok('诊断说明要对话补全预设', /对话补全/.test(env.engine.snapshot().channels.reason));
 }
 
+// ── 22. 推理字段兼容（推理模型 / 中转把正文放 reasoning_content）────
+function emptyPoolState(extra) {
+    return Object.assign(pooledState(), { pool: { schema: 1, owner: null, source: null, cards: [], targets: {}, nextId: 1, status: 'empty', error: '', pending: null, autoAttempted: false } }, extra || {});
+}
+{
+    const env = await boot({
+        cfg: { poolTotalCount: 4, poolPlotOn: true, poolEmotionOn: false, poolNsfwOn: false },
+        state: emptyPoolState(),
+        plan: { contentEmpty: true, reasoning: '让我先想想怎么写。\n剧情|寄错的信，称呼却很熟悉\n剧情|门缝里塞进一张旧车票' },
+    });
+    T.group('推理字段兜住建池');
+    const r = await env.engine.app.buildPool({ confirmed: true });
+    T.ok('content 为空时用推理字段建池成功', r.ok && r.accepted === 2, r.reason);
+    T.ok('结果里注明内容来自推理字段', /推理字段/.test(r.reason), r.reason);
+    T.eq('收下两条纸条', env.state.readState().pool.cards.length, 2);
+    T.ok('思考文字没被当成纸条', !env.state.readState().pool.cards.some(c => /让我先想想/.test(c.hook)));
+}
+{
+    const env = await boot({ plan: { contentEmpty: true, reasoning: '用户要一批纸条，我得先分析角色卡……（纯思考，没有成形的纸条）' } });
+    const r = await env.engine.app.buildPool({ confirmed: true });
+    T.ok('推理字段里没有纸条时明确失败', !r.ok && /未收到有效的新纸条/.test(r.reason), r.reason);
+}
+{
+    const env = await boot({ plan: { contentEmpty: true, finishReason: 'length' } });
+    const r = await env.engine.app.buildPool({ confirmed: true });
+    T.ok('两边都空时报错带 finish_reason', !r.ok && /finish_reason=length/.test(r.reason), r.reason);
+    T.ok('提示换模型', /换个模型/.test(r.reason), r.reason);
+}
+{
+    const env = await boot({
+        cfg: { chimeMode: 'dynamic', poolModeVersion: 1, chimeInjectCount: 1 },
+        state: pooledState({ lastDrawAt: 0 }),
+        plan: { contentEmpty: true, reasoning: '先分析当前场景。\n{"intervene":true,"reason":"有缺口","cards":[{"title":"来信","hook":"寄错的信，称呼却很熟悉，可以让她顺着接话","anchor":"开场提到过信箱"}]}' },
+    });
+    const r = await env.engine.app.drawNow();
+    T.ok('动态模式能从推理字段剥出 JSON', r.ok && r.cards.length === 1, r.reason);
+    T.ok('剥出的是那个事件', r.ok && /寄错的信/.test(r.cards[0].hook));
+}
+{
+    const env = await boot({ plan: { reply: '剧情|正常返回的纸条内容', poolTotalCount: 2 } });
+    const r = await env.engine.app.buildPool({ confirmed: true });
+    T.ok('正常 content 路径不受影响', r.ok && r.accepted === 1, r.reason);
+    T.ok('正常路径不标推理字段', !/推理字段/.test(r.reason), r.reason);
+}
+
 process.exit(T.report('百宝袋酒馆版 · 回归测试') ? 1 : 0);

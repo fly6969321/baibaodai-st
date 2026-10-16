@@ -124,9 +124,10 @@ export function installFetch(plan) {
         }
         if (plan.httpStatus) return jsonResponse(plan.httpBody || { error: { message: 'bad' } }, plan.httpStatus);
         const reply = typeof plan.reply === 'function' ? plan.reply(body, { backend }) : plan.reply;
-        return jsonResponse({
-            choices: [{ message: { content: reply === undefined ? '剧情|寄错的信，称呼却很熟悉' : reply }, finish_reason: plan.finishReason || 'stop' }],
-        });
+        const message = {};
+        if (!plan.contentEmpty) message.content = reply === undefined ? '剧情|寄错的信，称呼却很熟悉' : reply;
+        if (plan.reasoning !== undefined) message.reasoning_content = plan.reasoning;
+        return jsonResponse({ choices: [{ message, finish_reason: plan.finishReason || 'stop' }] });
     };
     globalThis.fetch.calls = calls;
     return calls;
