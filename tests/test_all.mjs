@@ -81,6 +81,12 @@ async function boot(options) {
     return { dom, ...h, calls, host: hostMod, cfg: cfgMod, state: stateMod, pool: poolMod, engine: engineMod, relay: relayMod, context: ctxMod };
 }
 
+async function waitFor(fn, ms) {
+    const end = Date.now() + (ms || 3000);
+    while (Date.now() < end) { if (fn()) return true; await new Promise(r => setTimeout(r, 10)); }
+    return false;
+}
+
 async function runTurn(env, type, opts) {
     opts = opts || {};
     await env.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, type, {}, !!opts.dryRun);
@@ -111,6 +117,23 @@ async function runTurn(env, type, opts) {
     T.ok('诊断里说明不用改预设', /不需要在预设里加条目/.test(snap.channels.reason));
     document.getElementById('dr-ball').dispatchEvent(new globalThis.window.Event('click'));
     T.ok('点浮标能打开面板', document.getElementById('dr-panel').classList.contains('show'));
+    await waitFor(() => document.getElementById('dr-chime-depth').value === '2');
+    T.eq('空投注入深度框显示生效值', document.getElementById('dr-chime-depth').value, '2');
+    T.eq('调度注入深度框显示生效值', document.getElementById('dr-coord-depth').value, '2');
+    const depthBox = document.getElementById('dr-chime-depth');
+    depthBox.value = '0';
+    depthBox.dispatchEvent(new globalThis.window.Event('input'));
+    document.getElementById('dr-pace-save').dispatchEvent(new globalThis.window.Event('click'));
+    await waitFor(() => env.cfg.config.chimeDepth === 0);
+    T.eq('改空投深度后配置生效', env.cfg.config.chimeDepth, 0);
+    T.eq('空投注入立刻按新深度', env.injections['baobaodai_chime'].depth, 0);
+    const coordBox = document.getElementById('dr-coord-depth');
+    coordBox.value = '6';
+    coordBox.dispatchEvent(new globalThis.window.Event('input'));
+    document.getElementById('dr-patrol-save').dispatchEvent(new globalThis.window.Event('click'));
+    await waitFor(() => env.cfg.config.coordDepth === 6);
+    T.eq('改调度深度后配置生效', env.cfg.config.coordDepth, 6);
+    T.eq('调度注入立刻按新深度', env.injections['baobaodai_coord'].depth, 6);
 }
 
 // ── 2. 注入（替代预设通道）────────────────────────────────────────
