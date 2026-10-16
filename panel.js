@@ -525,11 +525,11 @@ function addEntry() {
     if (!host || document.getElementById('dr-entry-open')) return;
     const box = document.createElement('div');
     box.className = 'inline-drawer dr-entry';
-    box.innerHTML = '<div class="inline-drawer-toggle inline-drawer-header"><b>👝 百宝袋</b>'
-        + '<div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>'
-        + '<div class="inline-drawer-content"><input type="button" class="menu_button" id="dr-entry-open" value="打开面板"></div>';
+    box.innerHTML = '<div class="inline-drawer-header" id="dr-entry-open" role="button" tabindex="0"><b>👝 百宝袋</b></div>';
     host.appendChild(box);
-    document.getElementById('dr-entry-open').addEventListener('click', () => openPanel());
+    const head = document.getElementById('dr-entry-open');
+    head.addEventListener('click', () => openPanel());
+    head.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(); } });
 }
 
 export async function mountPanel() {

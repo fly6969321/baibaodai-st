@@ -114,6 +114,15 @@ async function runTurn(env, type, opts) {
     T.ok('文案已本地化（不是裸 key）', (document.querySelector('[data-dr-i18n="layout.delivery"]') || {}).textContent === '剧情投放');
     T.ok('版本号已填', /^v0\.5\.16$/.test(document.getElementById('dr-head-v').textContent));
     T.ok('酒馆扩展区入口已加', !!document.getElementById('dr-entry-open'));
+    T.eq('入口没有多余的按钮（只剩标题行）', document.querySelectorAll('.dr-entry button, .dr-entry input').length, 0);
+    T.eq('入口没有可展开的内容区', document.querySelectorAll('.dr-entry .inline-drawer-content').length, 0);
+    document.getElementById('dr-panel').classList.remove('show');
+    document.getElementById('dr-entry-open').dispatchEvent(new globalThis.window.Event('click'));
+    T.ok('点标题行直接打开面板', document.getElementById('dr-panel').classList.contains('show'));
+    document.getElementById('dr-panel').classList.remove('show');
+    const head = document.getElementById('dr-entry-open');
+    head.dispatchEvent(new globalThis.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    T.ok('回车也能打开面板', document.getElementById('dr-panel').classList.contains('show'));
     const snap = await env.engine.snapshot();
     T.ok('快照可取', !!snap && snap.version === '0.5.16');
     T.ok('诊断显示预设条目检查通过', /预设「如梦织境」条目检查通过/.test(snap.channels.reason), snap.channels.reason);
