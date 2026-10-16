@@ -121,10 +121,10 @@
   position: fixed;
   z-index: 99991;
   left: 70px;
-  top: calc(var(--tavo-inset-top-bar, 0px) + 20px);
+  top: calc(var(--tavo-inset-top-bar, 0px) + 120px);
   width: 460px;
   max-width: 96vw;
-  max-height: calc(100vh - var(--tavo-inset-top-bar, 0px) - var(--tavo-inset-bottom-input, 0px) - 64px);
+  max-height: calc(100vh - var(--tavo-inset-top-bar, 0px) - var(--tavo-inset-bottom-input, 0px) - 264px);
   display: none;
   flex-direction: column;
   background: var(--dr-bg);
@@ -336,8 +336,8 @@ label.dr-sw input { width: 17px; height: 17px; accent-color: var(--dr-accent); f
   #dr-panel {
     width: 96vw;
     left: 2vw !important;
-    top: calc(var(--tavo-inset-top-bar, 0px) + 12px) !important;
-    max-height: calc(100vh - var(--tavo-inset-top-bar, 0px) - var(--tavo-inset-bottom-input, 0px) - 48px);
+    top: calc(var(--tavo-inset-top-bar, 0px) + 112px) !important;
+    max-height: calc(100vh - var(--tavo-inset-top-bar, 0px) - var(--tavo-inset-bottom-input, 0px) - 248px);
   }
   #dr-panel-body { padding: 8px 10px 12px; }
 }
