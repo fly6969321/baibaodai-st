@@ -114,6 +114,9 @@ async function runTurn(env, type, opts) {
     T.ok('文案已本地化（不是裸 key）', (document.querySelector('[data-dr-i18n="layout.delivery"]') || {}).textContent === '剧情投放');
     T.ok('版本号已填', /^v0\.5\.16$/.test(document.getElementById('dr-head-v').textContent));
     T.ok('酒馆扩展区入口已加', !!document.getElementById('dr-entry-open'));
+    T.ok('入口用酒馆标准标题栏结构（跟随主题样式）', !!document.querySelector('.dr-entry .inline-drawer-toggle.inline-drawer-header'));
+    T.ok('入口带酒馆的折叠图标', !!document.querySelector('.dr-entry .inline-drawer-icon'));
+    T.ok('入口标题是加粗的扩展名', /百宝袋/.test(document.querySelector('.dr-entry b').textContent));
     T.eq('入口没有多余的按钮（只剩标题行）', document.querySelectorAll('.dr-entry button, .dr-entry input').length, 0);
     T.eq('入口没有可展开的内容区', document.querySelectorAll('.dr-entry .inline-drawer-content').length, 0);
     document.getElementById('dr-panel').classList.remove('show');

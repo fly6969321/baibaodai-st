@@ -525,10 +525,15 @@ function addEntry() {
     if (!host || document.getElementById('dr-entry-open')) return;
     const box = document.createElement('div');
     box.className = 'inline-drawer dr-entry';
-    box.innerHTML = '<div class="inline-drawer-header" id="dr-entry-open" role="button" tabindex="0"><b>👝 百宝袋</b></div>';
+    // 外壳照酒馆其他扩展的标题栏写：同样的类名才跟随酒馆主题，不能省掉 inline-drawer-toggle 与图标。
+    // 区别只是不留展开区，点标题行直接开面板。
+    box.innerHTML = '<div class="inline-drawer-toggle inline-drawer-header" id="dr-entry-open" role="button" tabindex="0">'
+        + '<b>👝 百宝袋</b>'
+        + '<div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>';
     host.appendChild(box);
     const head = document.getElementById('dr-entry-open');
-    head.addEventListener('click', () => openPanel());
+    // 阻止冒泡：酒馆的折叠处理器找不到展开区，没必要让它去翻图标状态
+    head.addEventListener('click', e => { e.stopPropagation(); openPanel(); });
     head.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPanel(); } });
 }
 

@@ -124,7 +124,7 @@
   top: calc(var(--tavo-inset-top-bar, 0px) + 90px);
   width: 460px;
   max-width: 96vw;
-  max-height: calc(100vh - var(--tavo-inset-top-bar, 0px) - var(--tavo-inset-bottom-input, 0px) - 204px);
+  max-height: calc(100vh - var(--tavo-inset-top-bar, 0px) - var(--tavo-inset-bottom-input, 0px) - 193px);
   display: none;
   flex-direction: column;
   background: var(--dr-bg);
@@ -337,11 +337,10 @@ label.dr-sw input { width: 17px; height: 17px; accent-color: var(--dr-accent); f
     width: 96vw;
     left: 2vw !important;
     top: calc(var(--tavo-inset-top-bar, 0px) + 82px) !important;
-    max-height: calc(100vh - var(--tavo-inset-top-bar, 0px) - var(--tavo-inset-bottom-input, 0px) - 188px);
+    max-height: calc(100vh - var(--tavo-inset-top-bar, 0px) - var(--tavo-inset-bottom-input, 0px) - 193px);
   }
   #dr-panel-body { padding: 8px 10px 12px; }
 }
 /* Keep the original two-tab layout; constrain controls inside Tavo's safe content area. */
 #dr-panel-body{min-height:0}#dr-panel-head,#dr-tabs{flex-shrink:0}#dr-panel input,#dr-panel select,#dr-panel textarea{max-width:100%;min-width:0}#dr-panel code{font-size:11px;overflow-wrap:anywhere}.dr-note{font-size:11px;line-height:1.65;color:var(--dr-fg2);overflow-wrap:anywhere;margin:6px 0}.dr-event+.dr-event{border-top:1px dashed var(--dr-line);margin-top:9px;padding-top:9px}.dr-event strong{color:var(--dr-fg)}.dr-event{min-width:0;overflow-wrap:anywhere}.dr-event p{margin:5px 0}.dr-event small{color:var(--dr-dim)}#dr-panel button:disabled{opacity:.55}#dr-panel [hidden]{display:none!important}#dr-panel :focus-visible,#dr-ball:focus-visible{outline:2px solid var(--dr-accent);outline-offset:2px}
 #dr-panel select{width:100%;min-width:0}#dr-panel .dr-field input[type=search]{width:100%}
-.dr-entry .inline-drawer-header{cursor:pointer}
