@@ -45,7 +45,7 @@ export async function buildContext(job, ms, s, selection) {
     const scenario = H.scenarioOverride();
     if (scenario) parts.push('【当前场景】\n' + H.cut(scenario, 2000));
     if (s.activeCards.length) parts.push('【当前候选｜状态=' + s.floatStage + '；不是已发生事实】\n' + JSON.stringify(s.activeCards));
-    if (s.history.length) parts.push('【最近五组投放记录｜fulfilled 为用户确认，其余不代表发生】\n' + JSON.stringify(s.history.slice(-5)));
+    if (s.history.length) parts.push('【最近五组投放记录｜delivered 仅表示纸条已随请求投送，不代表剧情发生；confirmedAt 表示手动确认；旧版 fulfilled 未必经用户确认，仍须以正文核实】\n' + JSON.stringify(s.history.slice(-5)));
     if (!selection && s.coordLog.length) parts.push('【此前场外小叮当｜需验收，不能当事实】\n' + s.coordLog.slice(-2).map(g => H.cut(g.text, 1200)).join('\n'));
     parts.push('【最近正文】\n' + story);
     return parts.join('\n\n');
@@ -63,6 +63,8 @@ export async function openingSource(job, ms) {
     }
     const persona = H.personaSection(true);
     if (persona) sections.push('【user 设定】\n' + H.cut(persona, 5000));
+    // /hide and summarizers set is_system on the original assistant message.
+    // Hiding the opening changes prompt visibility, not the pool's source story.
     const opening = ms.find(m => m.role === 'assistant');
     if (opening) sections.push('【第一楼开场】\n' + H.cut(opening.narrative, 5000));
     const scenario = H.scenarioOverride(true);

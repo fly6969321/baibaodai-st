@@ -6,6 +6,11 @@ export const TYPES = {
     GENERATION_ENDED: 'GENERATION_ENDED',
     GENERATION_STOPPED: 'GENERATION_STOPPED',
     MESSAGE_RECEIVED: 'MESSAGE_RECEIVED',
+    MESSAGE_SENT: 'MESSAGE_SENT',
+    CHARACTER_MESSAGE_RENDERED: 'CHARACTER_MESSAGE_RENDERED',
+    CHAT_COMPLETION_PROMPT_READY: 'CHAT_COMPLETION_PROMPT_READY',
+    GENERATE_AFTER_DATA: 'GENERATE_AFTER_DATA',
+    CHAT_COMPLETION_SETTINGS_READY: 'CHAT_COMPLETION_SETTINGS_READY',
     MESSAGE_EDITED: 'MESSAGE_EDITED',
     MESSAGE_UPDATED: 'MESSAGE_UPDATED',
     MESSAGE_DELETED: 'MESSAGE_DELETED',
@@ -23,8 +28,16 @@ export class Emitter {
         if (!this.map.has(event)) this.map.set(event, []);
         this.map.get(event).push(fn);
     }
+    makeFirst(event, fn) {
+        const list = (this.map.get(event) || []).filter(listener => listener !== fn);
+        list.unshift(fn);
+        this.map.set(event, list);
+    }
+    removeListener(event, fn) {
+        this.map.set(event, (this.map.get(event) || []).filter(listener => listener !== fn));
+    }
     async emit(event, ...args) {
-        for (const fn of (this.map.get(event) || [])) {
+        for (const fn of (this.map.get(event) || []).slice()) {
             try { await fn(...args); } catch (e) { this.lastError = e; }
         }
     }
@@ -45,7 +58,8 @@ export function presetWith(entries) {
     const order = [{ identifier: 'main', enabled: true }, { identifier: 'chatHistory', enabled: true }];
     entries.forEach((e, i) => {
         const id = 'bbd-' + i;
-        prompts.push({ identifier: id, name: e.name || id, role: e.role || 'system', content: e.content, injection_position: e.absolute ? 1 : 0, injection_depth: 4 });
+        prompts.push({ identifier: id, name: e.name || id, role: e.role || 'system', content: e.content, injection_position: e.absolute ? 1 : 0, injection_depth: 4,
+            injection_trigger: e.triggers || [] });
         order.push({ identifier: id, enabled: e.enabled !== false });
     });
     return { preset_settings_openai: '如梦织境', prompts, prompt_order: [{ character_id: 100000, order: [] }, { character_id: 100001, order }] };
@@ -90,6 +104,7 @@ export function createContext(init) {
         powerUserSettings: { persona_description: init.persona === undefined ? '二十六岁，记者' : init.persona },
         eventSource: emitter,
         eventTypes: TYPES,
+        streamingProcessor: null,
         extensionPrompts: injections,
         mainApi: init.mainApi || 'openai',
         chatCompletionSettings: init.preset || presetWith(BOTH_ENTRIES),
@@ -100,12 +115,50 @@ export function createContext(init) {
         setExtensionPrompt: (key, value, position, depth, scan, role) => {
             injections[key] = { value: String(value), position, depth, scan, role };
         },
-        substituteParams: s => String(s).replace(/\{\{user\}\}/g, ctx.name1),
+        substituteParams: s => String(s).replace(/\{\{user\}\}/g, ctx.name1)
+            .replace(/\{\{getvar::([^}]+)\}\}/g, (_, key) => String((ctx.chatMetadata.variables || {})[key] || '')),
         getRequestHeaders: () => ({ 'Content-Type': 'application/json', 'X-CSRF-Token': 'tok' }),
         unshallowCharacter: async () => {},
     };
     globalThis.SillyTavern = { getContext: () => ctx };
     return { ctx, emitter, stats, injections };
+}
+
+// 对齐 ST：AFTER_COMMANDS -> 用户入库 -> manifest 拦截器 -> 预设展开 ->
+// PROMPT_READY -> GENERATE_AFTER_DATA -> CHAT_COMPLETION_SETTINGS_READY。
+// 测试可把这些步骤拆开，检查事件之间发生的状态变化。
+export async function interceptGeneration(env, type = 'normal') {
+    await globalThis.baobaodaiGenerationInterceptor(env.ctx.chat, 8000, () => {}, type);
+}
+
+export async function emitPromptReady(env, type = 'normal', prompt, options = {}) {
+    if (!prompt) {
+        const settings = env.ctx.chatCompletionSettings;
+        const order = (settings.prompt_order.find(entry => String(entry.character_id) === '100001') || {}).order || [];
+        prompt = order.filter(entry => entry.enabled).map(entry => settings.prompts.find(p => p.identifier === entry.identifier))
+            .filter(p => p && (!p.injection_trigger || !p.injection_trigger.length || p.injection_trigger.includes(type)))
+            .map(p => ({ role: p.role, content: env.ctx.substituteParams(p.content) }));
+    }
+    const data = { chat: prompt, dryRun: false };
+    await env.emitter.emit(TYPES.CHAT_COMPLETION_PROMPT_READY, data);
+    const generationData = { prompt: data.chat };
+    // generateRaw 也发PROMPT_READY，但不经过Generate的GENERATE_AFTER_DATA。
+    if (!options.raw) await env.emitter.emit(TYPES.GENERATE_AFTER_DATA, generationData, false);
+    // createGenerationParameters 先filter成新数组，再把type和messages交给SETTINGS_READY。
+    const request = { type: options.raw ? 'quiet' : type, messages: generationData.prompt.filter(message => message && typeof message === 'object'), stream: false };
+    await env.emitter.emit(TYPES.CHAT_COMPLETION_SETTINGS_READY, request);
+    return request.messages;
+}
+
+export async function beginGeneration(env, type = 'normal', options = {}) {
+    await env.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, type, {}, !!options.dryRun);
+    if (options.dryRun) return;
+    if (options.userText !== undefined) {
+        env.ctx.chat.push(userMsg(options.userText));
+        await env.emitter.emit(TYPES.MESSAGE_SENT, env.ctx.chat.length - 1);
+    }
+    await interceptGeneration(env, type);
+    return emitPromptReady(env, type, options.prompt);
 }
 
 // 可编程的 fetch：直连可设为 CORS 失败，后端通道单独计数

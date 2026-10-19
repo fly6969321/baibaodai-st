@@ -13,7 +13,7 @@ import {
 } from './pool.js';
 import { listModels as relayListModels, directAvailable } from './relay.js';
 
-export const VERSION = '0.5.16';
+export const VERSION = '0.5.17';
 
 const prepared = new Map(), terminal = new Set();
 let bootPromise = null;
@@ -56,7 +56,8 @@ async function draw(s, round, ms, job, preview) {
         if (!result.cards.length) return;
         archiveActive(next, 'retired'); next.activeCards = result.cards.slice(0, config.chimeInjectCount);
         next.floatStage = 'active'; next.floatAt = round; next.floatCard = null;
-        next.history.push({ cards: next.activeCards, round, status: 'active', mode: 'dynamic', t: Date.now() });
+        next.activeOrigin = job.generationId ? 'automatic' : 'manual';
+        next.history.push({ cards: next.activeCards, round, status: 'active', mode: 'dynamic', origin: next.activeOrigin, t: Date.now() });
         next.history = next.history.slice(-20);
     }, job);
     return { ok: true, cards: result.cards, skipped: !result.cards.length, reason: result.reason };
@@ -84,12 +85,12 @@ async function pipeline(event, job) {
     loadCfg(); await guard(job);
     const ms = H.messages(), anchor = H.anchorOf(ms);
     if (!config.chimeEnabled && !config.coordEnabled) return;
-    const checked = checkChannels();
+    const checked = checkChannels(event.type);
     if (!checked.chime && !checked.coord) throw Error(checked.reason);
     const chime = checked.chime, coord = checked.coord;
-    let s = readState();
     await validatePoolSource(job, ms);
-    await bindPool(job);
+    await bindPool(job, chime);
+    let s = readState();
     if (event.reroll) {
         await change(next => {
             next.rerolls = next.rerollAnchor === anchor ? next.rerolls + 1 : 1;
@@ -101,16 +102,21 @@ async function pipeline(event, job) {
     if (event.continuation || event.groupFollowup || !anchor || s.lastPreparedAnchor === anchor) return;
     let round = await lifecycle(ms, job);
     s = readState();
-    const errors = [];
+    const errors = checked.ok ? [] : [checked.reason];
+    let failed = false;
     if (chime && !s.paused && !(config.chimeMode === 'pool' && poolOf(s).pending) && round - s.lastDrawAt >= config.chimeN) {
-        try { await draw(s, round, ms, job, false); } catch (e) { errors.push(e.message); }
+        try { await draw(s, round, ms, job, false); } catch (e) { failed = true; errors.push(e.message); }
     }
     await guard(job); s = readState();
     if (coord && config.coordPatrol && round - s.coordAt >= config.coordPatrolN) {
-        try { await coordinator(s, round, ms, job); } catch (e) { errors.push(e.message); }
+        try { await coordinator(s, round, ms, job); } catch (e) { failed = true; errors.push(e.message); }
     }
     await guard(job);
-    await change(next => { next.lastPreparedAnchor = anchor; next.rerolls = 0; next.ngSuggested = false; }, job);
+    await change(next => {
+        // A failed selection must remain retryable for the same user message.
+        if (!failed) next.lastPreparedAnchor = anchor;
+        next.rerolls = 0; next.ngSuggested = false;
+    }, job);
     setDiagnostic(errors.length ? errors.join('；') : '');
 }
 
@@ -122,6 +128,7 @@ export function prepare(event) {
         try {
             if (terminal.has(key)) return;
             if (bootPromise) await bootPromise;
+            if (terminal.has(key)) return;
             j = await startJob('prepare', event.generationId);
             if (String(j.chatId) !== String(event.chatId)) { stop(j); return; }
             const timeout = new Promise((_, reject) => {
@@ -138,6 +145,7 @@ export function prepare(event) {
 
 export async function finish(event) {
     const key = String(event.chatId) + ':' + event.generationId;
+    if (terminal.has(key)) return;
     terminal.add(key);
     if (terminal.size > 80) terminal.delete(terminal.values().next().value);
     jobs.forEach(j => {
@@ -172,13 +180,17 @@ async function manual(kind, fn) {
 }
 
 // 两个模块各判各的：缺调度条目不能拖垮接好的空投
-function checkChannels() {
+function checkChannels(generationType) {
     const entries = H.presetEntries();
     if (!entries) return { ok: false, chime: false, coord: false, reason: '需要对话补全（Chat Completion）预设；当前接口模式读不到预设条目' };
     const judge = (variable, enabled) => {
         if (!enabled) return { ok: true, live: false, note: '' };
-        const hit = entries.some(e => e.enabled && e.role === 'system' && e.content.indexOf('{{getvar::' + variable + '}}') >= 0);
-        return hit ? { ok: true, live: true, note: '' } : { ok: false, live: false, note: variable + '：预设缺少已启用的 system 条目' };
+        const matching = entries.filter(e => e.enabled && e.role === 'system' && e.content.indexOf('{{getvar::' + variable + '}}') >= 0);
+        if (!matching.length) return { ok: false, live: false, note: variable + '：预设缺少已启用的 system 条目' };
+        const type = String(generationType || '').trim().toLowerCase();
+        const live = !type || matching.some(e => !e.triggers.length || e.triggers.includes(type));
+        return live ? { ok: true, live: true, note: '' }
+            : { ok: false, live: false, note: variable + '：预设条目未允许本次生成类型 ' + type };
     };
     const chime = judge(CHIME_VAR, config.chimeEnabled), coord = judge(COORD_VAR, config.coordEnabled);
     const notes = [chime.note, coord.note].filter(Boolean);
@@ -277,7 +289,7 @@ export const app = {
     selfCheck: async () => {
         if (bootPromise) await bootPromise;
         try { await localEdit(() => {}); } catch (_) {}
-        const r = channelStatus();
+        const r = checkChannels();
         return Object.assign({}, r, {
             chimeConfigured: !!(apiConfig('chime').url && apiConfig('chime').model),
             coordConfigured: !!(apiConfig('coord').url && apiConfig('coord').model),

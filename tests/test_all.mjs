@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { setupDom, createContext, installFetch, makeRunner, userMsg, botMsg, hiddenMsg, TYPES, Emitter, presetWith, BOTH_ENTRIES } from './harness.mjs';
+import { pathToFileURL } from 'node:url';
+import { setupDom, createContext, installFetch, makeRunner, userMsg, botMsg, hiddenMsg, TYPES, Emitter, presetWith, BOTH_ENTRIES, beginGeneration, interceptGeneration, emitPromptReady } from './harness.mjs';
 
 const EXT = process.argv[2];
 if (!EXT) { console.error('用法: node test_all.mjs <扩展目录绝对路径>'); process.exit(2); }
-const mod = name => import(path.join(EXT, name));
+const mod = name => import(pathToFileURL(path.resolve(EXT, name)).href);
 const PANEL_HTML = fs.readFileSync(path.join(EXT, 'panel.html'), 'utf8');
 
 // 被测代码是 ES module 单例，事件监听只注册一次，所以总线和注入表全程复用
@@ -26,12 +27,21 @@ function pooledState(extra) {
     const cards = [];
     for (let i = 1; i <= 4; i++) cards.push({ format: 'slip-v1', id: 'p-' + i, title: '', hook: '剧情纸条' + i, category: 'plot', kind: 'plot', status: 'available' });
     for (let i = 5; i <= 8; i++) cards.push({ format: 'slip-v1', id: 'p-' + i, title: '', hook: '情感纸条' + i, category: 'emotion', kind: 'emotion', status: 'available' });
-    return Object.assign({
+    const state = Object.assign({
         schemaVersion: 3, revision: 1, lastDrawAt: 0, coordAt: 0, paused: false,
         tone: '想谈恋爱', history: [], coordLog: [], candidates: [], activeCards: [], floatStage: 'done', floatAt: -1,
         lastPreparedAnchor: '', rerolls: 0,
         pool: { schema: 1, owner: 'c:chat-1', source: null, cards, targets: { plot: 4, emotion: 4 }, nextId: 9, status: 'ready', error: '', pending: null, autoAttempted: true },
     }, extra || {});
+    // Existing in-flight pool fixtures must represent a real reserved batch.
+    if (state.activeCards.length && state.activeCards.every(c => c.id)) {
+        state.pool.pending = { ids: state.activeCards.map(c => c.id), key: '', at: Date.now() };
+        state.activeCards.forEach(card => {
+            Object.assign(state.pool.cards.find(c => c.id === card.id), card, { status: 'reserved' });
+        });
+        state.history.push({ mode: 'pool', status: 'active', cards: state.activeCards, round: state.floatAt });
+    }
+    return state;
 }
 
 function vars(env) { return env.ctx.chatMetadata.variables || {}; }
@@ -91,7 +101,7 @@ async function waitFor(fn, ms) {
 
 async function runTurn(env, type, opts) {
     opts = opts || {};
-    await env.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, type, {}, !!opts.dryRun);
+    await beginGeneration(env, type, { dryRun: !!opts.dryRun });
     if (opts.reply !== false) {
         if (opts.pushReply !== false) env.ctx.chat.push(botMsg('回复正文'));
         await env.emitter.emit(TYPES.MESSAGE_RECEIVED, env.ctx.chat.length - 1, type);
@@ -112,7 +122,7 @@ async function runTurn(env, type, opts) {
     const missing = ids.filter(id => !document.getElementById(id));
     T.eq('结构里 142 个 id 全部可取到', missing, []);
     T.ok('文案已本地化（不是裸 key）', (document.querySelector('[data-dr-i18n="layout.delivery"]') || {}).textContent === '剧情投放');
-    T.ok('版本号已填', /^v0\.5\.16$/.test(document.getElementById('dr-head-v').textContent));
+    T.ok('版本号已填', /^v0\.5\.17$/.test(document.getElementById('dr-head-v').textContent));
     T.ok('酒馆扩展区入口已加', !!document.getElementById('dr-entry-open'));
     T.ok('入口用酒馆标准标题栏结构（跟随主题样式）', !!document.querySelector('.dr-entry .inline-drawer-toggle.inline-drawer-header'));
     T.ok('入口带酒馆的折叠图标', !!document.querySelector('.dr-entry .inline-drawer-icon'));
@@ -127,7 +137,7 @@ async function runTurn(env, type, opts) {
     head.dispatchEvent(new globalThis.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     T.ok('回车也能打开面板', document.getElementById('dr-panel').classList.contains('show'));
     const snap = await env.engine.snapshot();
-    T.ok('快照可取', !!snap && snap.version === '0.5.16');
+    T.ok('快照可取', !!snap && snap.version === '0.5.17');
     T.ok('诊断显示预设条目检查通过', /预设「如梦织境」条目检查通过/.test(snap.channels.reason), snap.channels.reason);
     document.getElementById('dr-ball').dispatchEvent(new globalThis.window.Event('click'));
     T.ok('点浮标能打开面板', document.getElementById('dr-panel').classList.contains('show'));
@@ -165,6 +175,8 @@ async function runTurn(env, type, opts) {
     await env.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, 'regenerate', {}, false);
     env.ctx.chat.pop();
     await env.emitter.emit(TYPES.MESSAGE_DELETED, env.ctx.chat.length);
+    await interceptGeneration(env, 'regenerate');
+    await emitPromptReady(env, 'regenerate');
     let s = env.state.readState();
     T.eq('重生成期间 lastDrawAt 不动', s.lastDrawAt, 7);
     T.eq('重生成期间不撤在场纸条', s.activeCards.length, 1);
@@ -174,11 +186,11 @@ async function runTurn(env, type, opts) {
     await env.emitter.emit(TYPES.GENERATION_ENDED, env.ctx.chat.length);
     s = env.state.readState();
     T.eq('重生成结束后 lastDrawAt 仍不动', s.lastDrawAt, 7);
-    await env.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, 'swipe', {}, false);
+    await beginGeneration(env, 'swipe');
     await env.emitter.emit(TYPES.GENERATION_ENDED, env.ctx.chat.length);
     T.eq('swipe 也算重生成不清计数', env.state.readState().lastDrawAt, 7);
     T.eq('连续三次给出手动诊断提示', (await (async () => {
-        await env.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, 'regenerate', {}, false);
+        await beginGeneration(env, 'regenerate');
         await env.emitter.emit(TYPES.GENERATION_ENDED, env.ctx.chat.length);
         return env.state.readState();
     })()).ngSuggested, true);
@@ -237,7 +249,7 @@ async function runTurn(env, type, opts) {
 {
     const env = await boot({ state: pooledState({ lastDrawAt: 0 }), cfg: { chimeN: 1 } });
     T.group('成功与失败结算');
-    await env.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, 'normal', {}, false);
+    await beginGeneration(env, 'normal');
     let s = env.state.readState();
     T.eq('本轮抽出两张待投', s.pool.cards.filter(c => c.status === 'reserved').length, 2);
     T.ok('预留已绑定本次生成', !!s.pool.pending && !!s.pool.pending.key);
@@ -247,16 +259,17 @@ async function runTurn(env, type, opts) {
     s = env.state.readState();
     T.eq('成功后记为已投', s.pool.cards.filter(c => c.status === 'used').length, 2);
     T.eq('成功后撤下展示', s.activeCards.length, 0);
-    T.eq('历史记为已兑现', (s.history[s.history.length - 1] || {}).status, 'fulfilled');
+    T.eq('历史记为已投送，不声称剧情已兑现', (s.history[s.history.length - 1] || {}).status, 'delivered');
 
     const env2 = await boot({ state: pooledState({ lastDrawAt: 0 }), cfg: { chimeN: 1 } });
-    await env2.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, 'normal', {}, false);
+    await beginGeneration(env2, 'normal');
     await env2.emitter.emit(TYPES.GENERATION_ENDED, env2.ctx.chat.length);
+    await env2.emitter.emit(TYPES.GENERATION_STOPPED);
     const s2 = env2.state.readState();
     T.eq('没出回复就不扣卡', s2.pool.cards.filter(c => c.status === 'used').length, 0);
     T.eq('纸条仍为预留等重试', s2.pool.cards.filter(c => c.status === 'reserved').length, 2);
     T.eq('预留解绑等下次重试复用', (s2.pool.pending || {}).key, '');
-    T.ok('失败记下原因', (s2.pool.pending || {}).lastFailure === 'no-reply');
+    T.ok('失败记下原因', ['no-reply', 'stopped'].includes((s2.pool.pending || {}).lastFailure));
 }
 
 // ── 9. 节奏控制 ────────────────────────────────────────────────
@@ -274,12 +287,12 @@ async function runTurn(env, type, opts) {
     await runTurn(env3, 'normal');
     T.eq('关闭投放时不抽', env3.state.readState().activeCards.length, 0);
 
-    const env4 = await boot({ cfg: { chimeN: 1 }, state: pooledState({ lastDrawAt: 0, pool: Object.assign(pooledState().pool, { pending: { ids: ['p-1'], key: '', at: Date.now() } }) }) });
-    await env4.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, 'normal', {}, false);
+    const env4 = await boot({ cfg: { chimeN: 1 }, state: pooledState({ lastDrawAt: 0, activeCards: [{ id: 'p-1', hook: '待重试纸条', category: 'plot' }], floatStage: 'active', floatAt: 0 }) });
+    await beginGeneration(env4, 'normal');
     T.ok('已有待结算预留时不重复抽', ((env4.state.readState().pool.pending || {}).ids || []).length === 1);
 
     const env5 = await boot({ cfg: { chimeN: 1 }, state: pooledState({ lastDrawAt: 0 }) });
-    await env5.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, 'continue', {}, false);
+    await beginGeneration(env5, 'continue');
     T.eq('续写不消费新一轮', env5.state.readState().activeCards.length, 0);
 }
 
@@ -288,9 +301,9 @@ async function runTurn(env, type, opts) {
     const env = await boot({ cfg: { chimeN: 1 }, state: pooledState({ lastDrawAt: 0 }) });
     T.group('群聊');
     await env.emitter.emit(TYPES.GROUP_WRAPPER_STARTED, { type: 'normal' });
-    await env.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, 'normal', {}, false);
+    await beginGeneration(env, 'normal');
     const first = env.state.readState().activeCards.length;
-    await env.emitter.emit(TYPES.GENERATION_AFTER_COMMANDS, 'normal', {}, false);
+    await beginGeneration(env, 'normal');
     const second = env.state.readState().activeCards.length;
     await env.emitter.emit(TYPES.GROUP_WRAPPER_FINISHED, { type: 'normal' });
     T.ok('第一个成员正常投放', first > 0);
@@ -404,7 +417,7 @@ async function runTurn(env, type, opts) {
     T.group('隐藏楼');
     const ms = env.host.messages();
     T.eq('隐藏楼被标出', ms.filter(m => m.hidden).length, 1);
-    T.eq('回合数不含隐藏楼', env.host.assistantRound(ms), 2);
+    T.eq('隐藏历史不重置助手回合数', env.host.assistantRound(ms), 3);
     T.ok('锚点取最后一条用户楼', env.host.anchorOf(ms).indexOf('1:') === 0);
 }
 
@@ -568,6 +581,28 @@ function emptyPoolState(extra) {
     const r = await env.engine.app.buildPool({ confirmed: true });
     T.ok('正常 content 路径不受影响', r.ok && r.accepted === 1, r.reason);
     T.ok('正常路径不标推理字段', !/推理字段/.test(r.reason), r.reason);
+}
+
+{
+    T.group('触发类型与失败后重试');
+    const preset = presetWith([BOTH_ENTRIES[0]]);
+    preset.prompts.find(p => p.identifier === 'bbd-0').injection_trigger = ['quiet'];
+    const env = await boot({ preset, cfg: { coordEnabled: false, poolUseContext: true }, state: pooledState() });
+    await runTurn(env, 'normal');
+    T.eq('本次类型不注入时不调用选卡API', env.calls.length, 0);
+    T.eq('本次类型不注入时不预留纸条', env.state.readState().pool.pending, null);
+    T.ok('诊断指出未允许当前生成类型', /未允许本次生成类型 normal/.test(env.engine.snapshot().diagnostic));
+}
+{
+    let attempt = 0;
+    const env = await boot({ cfg: { coordEnabled: false, poolUseContext: true }, state: pooledState(),
+        plan: { reply: () => ++attempt === 1 ? 'bad json' : '{"ids":["p-1"],"reason":"本次有效"}' } });
+    await beginGeneration(env, 'normal');
+    await env.emitter.emit(TYPES.GENERATION_STOPPED);
+    T.eq('选卡失败没有锁死当前用户锚点', env.state.readState().lastPreparedAnchor, '');
+    await beginGeneration(env, 'normal');
+    T.eq('同一用户输入重试确实重新选卡', attempt, 2);
+    T.eq('有效重试正常预留选择结果', env.state.readState().pool.pending.ids, ['p-1']);
 }
 
 process.exit(T.report('百宝袋酒馆版 · 回归测试') ? 1 : 0);

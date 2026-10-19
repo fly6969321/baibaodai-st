@@ -2,8 +2,9 @@
   "display_name": "👝 百宝袋",
   "loading_order": 100,
   "js": "index.js",
+  "generate_interceptor": "baobaodaiGenerationInterceptor",
   "css": "style.css",
   "author": "fly6969321",
-  "version": "0.5.16",
-  "homePage": "https://github.com/upcjiangxiaoyi-art/arrebol-director-room"
+  "version": "0.5.17",
+  "homePage": "https://github.com/fly6969321/baibaodai-st"
 }

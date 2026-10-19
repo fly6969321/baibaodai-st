@@ -58,10 +58,16 @@ export function writeRawState(next) {
 
 export function chatKey() {
     const c = ctx();
-    if (c.groupId) return 'g:' + c.groupId;
     const id = c.getCurrentChatId ? c.getCurrentChatId() : c.chatId;
     if (id == null || id === '') return null;
+    if (c.groupId) return 'g:' + c.groupId + ':' + id;
     return 'c:' + id;
+}
+
+// 只供把本聊天已有的旧群聊卡池迁移到包含聊天文件名的新身份。
+export function legacyChatKey() {
+    const c = ctx();
+    return c.groupId ? 'g:' + c.groupId : chatKey();
 }
 
 export function chatInfo() {
@@ -78,15 +84,56 @@ export function narrativeText(m) {
     return messageText(m)
         .replace(/image###[\s\S]*?###/g, '')
         .replace(/!\[(?:[^\]\\]|\\.)*\]\((?:[^()\\]|\\.|\([^()]*\))*\)/g, '')
+        .replace(/<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, '')
         .trim();
 }
 
-// is_system 同时表示「系统条」和「/hide 隐藏楼」，两者都不进 prompt
+// 保存值快照：酒馆流式回复会原地改写同一个 message 对象。
+export function replyBaseline() {
+    return messages().map(m => ({ raw: m.raw, narrative: m.narrative, swipeId: m.swipeId }));
+}
+
+export function hasNewReply(index, baseline, type) {
+    const m = messages().find(item => item.index === Number(index));
+    if (!m || m.role !== 'assistant' || !m.narrative || m.narrative === '...') return false;
+    const before = baseline && baseline[m.index];
+    if (!before) return true;
+    if (['swipe', 'regenerate', 'continue'].indexOf(type) < 0 || m.index !== baseline.length - 1) return false;
+    return m.raw !== before.raw || m.narrative !== before.narrative || m.swipeId !== before.swipeId;
+}
+
+// getContext 暴露的是当前 StreamingProcessor；必须在 ENDED 回调入口读取，
+// 主流程随后会把它置空。正常完成和用户停止均 isFinished，网络错误另设 isStopped。
+export function streamStatus() {
+    const p = ctx().streamingProcessor;
+    if (!p) return null;
+    return {
+        processor: p,
+        type: p.type || 'normal', messageId: p.messageId,
+        finished: p.isFinished === true, failed: p.isStopped === true,
+        aborted: !!(p.abortController && p.abortController.signal.aborted),
+    };
+}
+
+export function promptContainsText(prompt, text) {
+    if (!text || !Array.isArray(prompt)) return false;
+    return prompt.some(message => {
+        if (!message || message.role !== 'system') return false;
+        const content = Array.isArray(message.content)
+            ? message.content.filter(part => part && part.type === 'text').map(part => part.text || '').join('\n')
+            : String(message.content || '');
+        return content.indexOf(text) >= 0;
+    });
+}
+
+// is_system 同时表示「系统条」和「/hide 隐藏楼」。真正系统消息由
+// getSystemMessageByType 写入 extra.type；工具结果另有 tool_invocations。
+// 隐藏只影响取上下文，不抹去用户/助手身份和已经发生的回合。
 export function messages() {
     const c = ctx();
     return (c.chat || []).map((m, index) => ({
         index,
-        role: m.is_user ? 'user' : (m.is_system ? 'system' : 'assistant'),
+        role: m.is_user ? 'user' : (m.extra && (m.extra.type || Array.isArray(m.extra.tool_invocations)) ? 'system' : 'assistant'),
         hidden: !!m.is_system,
         name: String(m && m.name || ''),
         text: messageText(m),
@@ -97,7 +144,7 @@ export function messages() {
 }
 
 export function assistantRound(ms) {
-    return ms.filter(m => m.role === 'assistant' && !m.hidden).length;
+    return ms.filter(m => m.role === 'assistant').length;
 }
 
 export function liveMessages(ms) {
@@ -141,7 +188,8 @@ export function presetEntries() {
     return order.map(entry => {
         const p = prompts.find(x => x && x.identifier === entry.identifier);
         if (!p) return null;
-        return { name: String(p.name || ''), role: p.role || 'system', content: String(p.content || ''), enabled: !!entry.enabled };
+        return { name: String(p.name || ''), role: p.role || 'system', content: String(p.content || ''), enabled: !!entry.enabled,
+            triggers: Array.isArray(p.injection_trigger) ? p.injection_trigger.slice() : [] };
     }).filter(Boolean);
 }
 

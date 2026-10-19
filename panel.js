@@ -173,10 +173,14 @@ function renderPool(r) {
         const a = all.filter(c => c.category === k);
         return names[k] + ': ' + a.length + '/' + ((p.targets || {})[k] || 0)
             + ' · ' + t('pool.countAvailable') + a.filter(c => c.status === 'available').length
+            + ' · ' + t('pool.countReserved') + a.filter(c => c.status === 'reserved').length
             + ' · ' + t('pool.countUsed') + a.filter(c => c.status === 'used').length;
     }).join('\n');
     const state = p.status === 'building' && !r.busy ? 'paused' : p.status;
-    $('dr-pool-summary').textContent = (state === 'ready' ? '' : t('pool.status.' + (state || 'empty')) + '\n')
+    const totals = t('pool.current') + ' · ' + t('pool.countAvailable') + all.filter(c => c.status === 'available').length
+        + ' · ' + t('pool.countReserved') + all.filter(c => c.status === 'reserved').length
+        + ' · ' + t('pool.countUsed') + all.filter(c => c.status === 'used').length;
+    $('dr-pool-summary').textContent = totals + '\n' + (state === 'ready' ? '' : t('pool.status.' + (state || 'empty')) + '\n')
         + summary + (p.pending ? '\n' + t('pool.pendingHint') : '') + (p.error ? '\n' + p.error : '');
     $('dr-pool-summary').style.whiteSpace = 'pre-line';
     ['dr-pool-build', 'dr-pool-refill', 'dr-pool-save', 'dr-pool-reset'].forEach(id => { $(id).disabled = !!r.busy || pending > 0; });
@@ -235,8 +239,11 @@ function render(r) {
     renderPool(r);
     $('dr-channel').textContent = r.channels ? r.channels.reason : t('repair.channelPending');
     if (s.ngSuggested) $('dr-channel').textContent += ' · ' + t('repair.ng');
-    $('dr-stage').textContent = s.floatStage === 'faded' ? t('repair.fade') : '';
-    cards($('dr-face'), s.floatStage === 'done' ? [] : s.activeCards);
+    const origin = s.pool && s.pool.pending ? s.pool.pending.origin : s.activeOrigin;
+    const manualCards = s.floatStage !== 'done' && origin === 'manual' ? s.activeCards : [];
+    $('dr-stage').textContent = manualCards.length && s.floatStage === 'faded' ? t('repair.fade') : '';
+    cards($('dr-face'), manualCards);
+    $('dr-close-card').disabled = !manualCards.length || !!r.busy || pending > 0;
     $('dr-coord-text').textContent = s.coordText || t('ui.noCoord');
     const changingDelivery = deliveryIntent && deliveryIntent.chatId === r.chatId;
     $('dr-delivery-toggle').setAttribute('aria-checked', String(changingDelivery ? deliveryIntent.enabled : !!c.chimeEnabled && !s.paused));
@@ -266,6 +273,7 @@ function render(r) {
     (s.history || []).slice().reverse().forEach(h => {
         const row = document.createElement('div'), label = document.createElement('small'), list = document.createElement('div');
         label.textContent = String(h.round) + ' · ' + t('repair.history.' + h.status);
+        if (h.previousPool) label.textContent += ' · ' + t('repair.history.previousPool');
         cards(list, h.cards || (h.card ? [{ hook: h.card, title: h.pool }] : []));
         row.append(label, list); history.appendChild(row);
     });

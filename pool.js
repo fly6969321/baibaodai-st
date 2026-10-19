@@ -2,7 +2,7 @@ import * as H from './host.js';
 import { config, loadCfg, apiConfig } from './config.js';
 import {
     jobs, epoch, readState, change, guard, scope, startJob, stop, cancelAll, notify,
-    poolOf, newPool, releasePool, consumePool, archiveActive, localEdit, setDiagnostic,
+    poolOf, newPool, releasePool, consumePool, archiveActive, localEdit, setDiagnostic, getDiagnostic,
 } from './state.js';
 import { buildContext, openingSource } from './context.js';
 import { ask } from './ask.js';
@@ -140,24 +140,92 @@ export async function buildPool(options) {
     } finally { clearTimeout(timer); if (j) { stop(j); jobs.delete(j); } notify(); }
 }
 
+function restorePoolReadiness(p) {
+    if (p.status !== 'stale') return false;
+    const missing = POOL_CATS.some(category => {
+        const target = Number(p.targets && p.targets[category]);
+        return Number.isFinite(target) && target > p.cards.filter(c => c && c.category === category).length;
+    });
+    p.status = missing ? 'partial' : 'ready';
+    p.error = '';
+    return true;
+}
+
+function clearSourceDiagnostic() {
+    if (getDiagnostic().startsWith('卡池与当前')) setDiagnostic('');
+}
+
+function changedSourceParts(previous, fresh, changedOwner) {
+    const split = text => {
+        const source = String(text || '');
+        const headings = Array.from(source.matchAll(/(?:^|\n\n)【(初始角色卡|user 设定|第一楼开场|聊天开场设定)】\n/g));
+        const parts = {};
+        headings.forEach((heading, i) => {
+            (parts[heading[1]] ||= []).push(source.slice(heading.index + heading[0].length,
+                i + 1 < headings.length ? headings[i + 1].index : source.length));
+        });
+        return parts;
+    };
+    const before = split(previous.text), after = split(fresh.text);
+    const names = { '初始角色卡': '角色卡', 'user 设定': 'user设定', '第一楼开场': '开场正文', '聊天开场设定': '聊天场景' };
+    const changed = Object.keys(names).filter(key => JSON.stringify(before[key] || []) !== JSON.stringify(after[key] || []))
+        .map(key => names[key]);
+    if (changedOwner) changed.unshift('聊天归属');
+    if (previous.identity && previous.identity !== fresh.identity && !changed.includes('user设定')) changed.push('角色/user身份');
+    return changed.join('、') || '角色/user/开场/场景';
+}
+
 export async function validatePoolSource(job, ms) {
     const s = readState(), p = poolOf(s);
     if (config.chimeMode !== 'pool' || !p.source) return;
     const fresh = await openingSource(job, ms);
-    if (String(p.owner) === String(job.chatId) && p.source.fingerprint === fresh.fingerprint) return;
+    if (String(p.owner) === String(job.chatId) && p.source.fingerprint === fresh.fingerprint) {
+        if (p.status === 'stale') {
+            await change(next => {
+                const pool = poolOf(next);
+                if (String(pool.owner) !== String(job.chatId) || !pool.source || pool.source.fingerprint !== fresh.fingerprint) {
+                    throw Error('卡池已改变，未恢复旧卡池状态');
+                }
+                restorePoolReadiness(pool);
+            }, job);
+            clearSourceDiagnostic();
+        }
+        return;
+    }
+    const legacy = typeof H.legacyChatKey === 'function' ? H.legacyChatKey() : '';
+    if (legacy && String(legacy) !== String(job.chatId) && String(p.owner) === String(legacy)
+        && p.source.fingerprint === fresh.fingerprint
+        && (!p.source.identity || p.source.identity === fresh.identity)) {
+        await change(next => {
+            const pool = poolOf(next);
+            if (String(pool.owner) !== String(legacy) || !pool.source || pool.source.fingerprint !== fresh.fingerprint
+                || (pool.source.identity && pool.source.identity !== fresh.identity)) throw Error('卡池已改变，未迁移旧聊天索引');
+            pool.owner = job.chatId;
+            if (pool.pending) pool.pending.key = '';
+            restorePoolReadiness(pool);
+        }, job);
+        clearSourceDiagnostic();
+        return;
+    }
+    const changed = changedSourceParts(p.source, fresh, String(p.owner) !== String(job.chatId));
     await change(next => {
         archiveActive(next, 'retired'); next.activeCards = []; next.floatStage = 'done';
         const pool = poolOf(next);
-        pool.status = 'stale'; pool.error = '角色卡、user或开场已变化；旧池保留但暂停使用，请明确重建';
+        pool.status = 'stale'; pool.error = changed + '已变化；旧池保留但暂停使用，请明确重建';
     }, job);
-    throw Error('卡池与当前角色/user/开场不匹配，已撤下旧纸条；请明确重建');
+    throw Error('卡池与当前' + changed + '不匹配，已撤下旧纸条；请明确重建');
 }
 
-export async function bindPool(job) {
-    if (config.chimeMode !== 'pool' || !config.chimeEnabled) return;
+export async function bindPool(job, channelAvailable = true) {
+    if (!channelAvailable || !job.generationId || config.chimeMode !== 'pool' || !config.chimeEnabled) return;
     const s = readState(), p = poolOf(s);
     if (s.paused || s.floatStage === 'done' || !p.pending || !s.activeCards.length) return;
-    await change(next => { poolOf(next).pending.key = String(job.chatId) + ':' + job.generationId; }, job);
+    await change(next => {
+        const pending = poolOf(next).pending;
+        if (pending && !next.paused && next.floatStage !== 'done' && next.activeCards.length) {
+            pending.key = String(job.chatId) + ':' + job.generationId;
+        }
+    }, job);
 }
 
 export async function settlePool(event) {
@@ -171,8 +239,8 @@ export async function settlePool(event) {
         const pool = poolOf(next);
         if (!pool.pending || pool.pending.key !== pendingKey) return;
         if (event.ok) {
-            consumePool(next, pendingKey, false);
-            archiveActive(next, 'fulfilled'); next.activeCards = []; next.floatStage = 'done'; next.floatCard = null;
+            if (!consumePool(next, pendingKey, false)) return;
+            next.activeCards = []; next.floatStage = 'done'; next.floatCard = null;
         } else {
             // 失败重试沿用这一组预留，不重新抽
             pool.pending.key = ''; pool.pending.lastFailure = event.reason || 'failed';
@@ -214,6 +282,7 @@ export async function drawPool(s, round, ms, job, preview) {
         reason = '本地盲抽；未调用筛选 API';
     }
     if (preview) return { ok: true, preview: true, cards: chosen, reason };
+    const origin = job.generationId ? 'automatic' : 'manual';
     await change(next => {
         if (next.revision !== s.revision) throw Error('筛选期间状态已变化，未扣卡');
         next.lastDecision = reason; next.lastDrawAt = round; next.candidates = chosen;
@@ -221,10 +290,10 @@ export async function drawPool(s, round, ms, job, preview) {
         releasePool(next); archiveActive(next, 'retired');
         const pool = poolOf(next);
         pool.cards.forEach(c => { if (ids.indexOf(c.id) >= 0) c.status = 'reserved'; });
-        pool.pending = { ids, key: job.generationId ? String(job.chatId) + ':' + job.generationId : '', at: Date.now(), anchor: H.anchorOf(ms) };
+        pool.pending = { ids, origin, key: job.generationId ? String(job.chatId) + ':' + job.generationId : '', at: Date.now(), anchor: H.anchorOf(ms) };
         next.activeCards = chosen.map(c => ({ id: c.id, title: c.title, hook: c.hook, anchor: c.anchor, category: c.category }));
         next.floatStage = 'active'; next.floatAt = round; next.floatCard = null;
-        next.history.push({ cards: next.activeCards, round, status: 'active', mode: 'pool', selectionMode: config.poolUseContext ? 'context' : 'blind', t: Date.now() });
+        next.history.push({ cards: next.activeCards, round, status: 'active', mode: 'pool', origin, selectionMode: config.poolUseContext ? 'context' : 'blind', t: Date.now() });
         next.history = next.history.slice(-20);
     }, job);
     return {
@@ -236,8 +305,9 @@ export async function drawPool(s, round, ms, job, preview) {
 export async function resetPool(confirmed, expectedChatId) {
     if (!confirmed) return { ok: false, reason: '重建会清空本聊天卡池及投放历史索引，请确认' };
     await localEdit(s => {
-        releasePool(s); s.pool = newPool();
-        archiveActive(s, 'retired'); s.activeCards = []; s.floatStage = 'done';
+        archiveActive(s, 'retired'); s.pool = newPool();
+        s.history.forEach(h => { if (h && h.mode === 'pool') h.previousPool = true; });
+        s.activeCards = []; s.floatStage = 'done'; s.floatCard = null;
     }, expectedChatId);
     return { ok: true, reason: '本聊天卡池已清空；点击开始建池才会调用 API' };
 }
