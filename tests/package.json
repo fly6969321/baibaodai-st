@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node test_all.mjs .. && node test_pool_state.mjs .. && node test_lifecycle.mjs .. && node test_ui_state.mjs .."
+    "test": "node test_all.mjs .. && node test_pool_state.mjs .. && node test_lifecycle.mjs .. && node test_ui_state.mjs .. && node test_narrative.mjs .. && node test_source_compat.mjs .."
   },
   "devDependencies": {
     "jsdom": "30.1.3"

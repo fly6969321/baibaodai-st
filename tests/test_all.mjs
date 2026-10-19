@@ -120,9 +120,9 @@ async function runTurn(env, type, opts) {
     T.eq('两个页签', document.querySelectorAll('.dr-tab').length, 2);
     const ids = (PANEL_HTML.match(/id="([^"]+)"/g) || []).map(x => x.slice(4, -1));
     const missing = ids.filter(id => !document.getElementById(id));
-    T.eq('结构里 142 个 id 全部可取到', missing, []);
+    T.eq('结构中的 id 全部可取到', missing, []);
     T.ok('文案已本地化（不是裸 key）', (document.querySelector('[data-dr-i18n="layout.delivery"]') || {}).textContent === '剧情投放');
-    T.ok('版本号已填', /^v0\.5\.17$/.test(document.getElementById('dr-head-v').textContent));
+    T.eq('版本号与引擎一致', document.getElementById('dr-head-v').textContent, 'v' + env.engine.VERSION);
     T.ok('酒馆扩展区入口已加', !!document.getElementById('dr-entry-open'));
     T.ok('入口用酒馆标准标题栏结构（跟随主题样式）', !!document.querySelector('.dr-entry .inline-drawer-toggle.inline-drawer-header'));
     T.ok('入口带酒馆的折叠图标', !!document.querySelector('.dr-entry .inline-drawer-icon'));
@@ -137,7 +137,7 @@ async function runTurn(env, type, opts) {
     head.dispatchEvent(new globalThis.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     T.ok('回车也能打开面板', document.getElementById('dr-panel').classList.contains('show'));
     const snap = await env.engine.snapshot();
-    T.ok('快照可取', !!snap && snap.version === '0.5.17');
+    T.ok('快照可取', !!snap && snap.version === '0.5.18');
     T.ok('诊断显示预设条目检查通过', /预设「如梦织境」条目检查通过/.test(snap.channels.reason), snap.channels.reason);
     document.getElementById('dr-ball').dispatchEvent(new globalThis.window.Event('click'));
     T.ok('点浮标能打开面板', document.getElementById('dr-panel').classList.contains('show'));
@@ -371,7 +371,7 @@ async function runTurn(env, type, opts) {
     const fp = (env.state.readState().pool.source || {}).fingerprint;
     env.ctx.characters[0].description = '换了一张卡';
     const r2 = await env.engine.app.buildPool({ confirmed: true });
-    T.ok('设定变了拒绝混池', !r2.ok && /已变化/.test(r2.reason), r2.reason);
+    T.ok('设定变了拒绝混池', !r2.ok && /角色卡不匹配/.test(r2.reason), r2.reason);
     T.ok('旧池保留', env.state.readState().pool.cards.length === 2);
     T.ok('指纹没被覆盖', (env.state.readState().pool.source || {}).fingerprint === fp);
 }

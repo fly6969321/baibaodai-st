@@ -80,12 +80,35 @@ export function messageText(m) {
     return String(m && m.mes || '').replace(/<!--[\s\S]*?-->/g, '').trim();
 }
 
-export function narrativeText(m) {
-    return messageText(m)
-        .replace(/image###[\s\S]*?###/g, '')
+// DrawGen appends "\n\n" + tag and records the exact tag when it has no
+// enclosing element. sdg_env stores only an arbitrary element name, so it
+// cannot prove that a matching story container is disposable image metadata.
+function stripRecordedDrawgenTail(text, message) {
+    const extra = message && message.extra;
+    const tag = extra && typeof extra.sdg_tag === 'string' ? extra.sdg_tag : '';
+    if (!tag.trim()) return text;
+    const tail = text.trimEnd();
+    if (!tail.endsWith(tag)) return text;
+    const prefix = tail.slice(0, tail.length - tag.length);
+    if (prefix && !/\r?\n\r?\n$/.test(prefix)) return text;
+    return prefix;
+}
+
+// Use this same normalization for the live opening and a saved opening
+// snapshot. Only complete, known image markers are removed; an unfinished
+// marker must not swallow story text up to a later marker's closing token.
+export function normalizeOpeningNarrative(text, message) {
+    return stripRecordedDrawgenTail(String(text == null ? '' : text), message)
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/image###(?:(?!image###)[\s\S])*?###/gi, '')
+        .replace(/<draw>(?:(?!<draw>)[\s\S])*?<\/draw>/gi, '')
         .replace(/!\[(?:[^\]\\]|\\.)*\]\((?:[^()\\]|\\.|\([^()]*\))*\)/g, '')
-        .replace(/<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, '')
+        .replace(/<img\b(?:[^<>"']|"[^"]*"|'[^']*')*>/gi, '')
         .trim();
+}
+
+export function narrativeText(m) {
+    return normalizeOpeningNarrative(m && m.mes || '', m);
 }
 
 // 保存值快照：酒馆流式回复会原地改写同一个 message 对象。

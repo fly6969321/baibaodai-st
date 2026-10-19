@@ -101,4 +101,153 @@ T.ok('清池后显示当前卡池已投0', /当前卡池.*已投0/.test(document
 const check = await E.app.selfCheck();
 T.eq('诊断自检正常返回', check.ok, true);
 
+T.group('沿用现有卡池确认');
+// jsdom supplies dialog elements but some versions omit their modal methods.
+for (const id of ['dr-realign-dialog', 'dr-reset-dialog']) {
+    const dialog = document.getElementById(id);
+    if (typeof dialog.showModal !== 'function') dialog.showModal = function () { this.open = true; };
+    if (typeof dialog.close !== 'function') dialog.close = function () { this.open = false; this.dispatchEvent(new Event('close')); };
+}
+const originalApp = window.__baobaodaiApp;
+const originalChatId = env.ctx.chatId;
+const realignCalls = [];
+let buildCalls = 0, resetCalls = 0;
+const previewCurrent = () => {
+    const state = S.readState();
+    return {
+        ok: true, confirmationRequired: true,
+        counts: { total: state.pool.cards.length, available: state.pool.cards.filter(c => c.status === 'available').length,
+            reserved: state.pool.cards.filter(c => c.status === 'reserved').length, used: state.pool.cards.filter(c => c.status === 'used').length },
+        expectedChatId: H.chatKey(), expectedEpoch: S.epoch, expectedRevision: state.revision,
+        expectedSourceFingerprint: state.pool.source.fingerprint, freshFingerprint: 'current-opening-fingerprint',
+        reason: '仅开场正文不同，可以确认沿用。',
+    };
+};
+let previewRealign = previewCurrent;
+let submitRealign = async options => {
+    if (options.expectedRevision !== S.readState().revision) return { ok: false, reason: '卡池状态已变化，请重新核对。' };
+    env.ctx.chatMetadata.baobaodai.pool.status = 'ready';
+    env.ctx.chatMetadata.baobaodai.pool.sourceMismatch = null;
+    return { ok: true, reason: '已沿用现有卡池。' };
+};
+window.__baobaodaiApp = {
+    ...originalApp,
+    buildPool: () => { buildCalls++; throw Error('Recovery UI must not build a pool'); },
+    resetPool: () => { resetCalls++; throw Error('Recovery UI must not reset a pool'); },
+    realignPoolSource: async options => {
+        realignCalls.push(options ? structuredClone(options) : null);
+        return options ? submitRealign(options) : previewRealign();
+    },
+};
+const realignDialog = document.getElementById('dr-realign-dialog');
+const realignRow = document.getElementById('dr-pool-realign-row');
+const realignButton = document.getElementById('dr-pool-realign');
+const prepareRealignment = async () => {
+    env.ctx.chatId = originalChatId;
+    await reset();
+    const pool = env.ctx.chatMetadata.baobaodai.pool;
+    pool.status = 'stale'; pool.sourceMismatch = { openingOnly: true };
+    previewRealign = previewCurrent;
+    realignCalls.length = 0;
+    await flushUI();
+};
+await prepareRealignment();
+T.eq('仅开场不一致时显示沿用入口', realignRow.hidden, false);
+T.eq('恢复入口没有重复ID', document.querySelectorAll('#dr-pool-realign-row').length, 1);
+T.ok('恢复入口位于付费建池确认之前', !!(realignRow.compareDocumentPosition(document.getElementById('dr-pool-consent')) & 4));
+T.eq('恢复入口无需付费建池勾选', document.getElementById('dr-pool-consent').checked, false);
+env.ctx.chatMetadata.baobaodai.pool.status = 'ready';
+await flushUI();
+T.eq('正常卡池隐藏沿用入口', realignRow.hidden, true);
+env.ctx.chatMetadata.baobaodai.pool.status = 'stale';
+env.ctx.chatMetadata.baobaodai.pool.sourceMismatch.openingOnly = false;
+await flushUI();
+T.eq('其他设定变化不显示沿用入口', realignRow.hidden, true);
+
+await prepareRealignment();
+const beforeCancel = structuredClone(S.readState().pool.cards);
+realignButton.click();
+await flushUI();
+T.eq('首次点击只调用预览', realignCalls, [null]);
+T.eq('预览后打开独立确认框', realignDialog.open, true);
+T.eq('沿用操作没有打开清空对话框', document.getElementById('dr-reset-dialog').open, false);
+T.ok('确认框展示最新库存数量', /共 4 条.*可抽 4.*预留 0.*已投 0/.test(document.getElementById('dr-realign-counts').textContent));
+const recoveryDescription = document.getElementById('dr-realign-description').textContent;
+T.ok('确认框说明保留纸条和已投记录', /保留全部纸条和已投记录/.test(recoveryDescription));
+T.ok('确认框说明撤下未投纸条再对齐开场', /撤下尚未投送的纸条/.test(recoveryDescription) && /对齐当前开场/.test(recoveryDescription));
+T.ok('确认框说明不调用建池接口', /不会调用建池 API/.test(recoveryDescription));
+document.getElementById('dr-realign-cancel').click();
+await flushUI();
+T.eq('取消关闭确认框', realignDialog.open, false);
+T.eq('取消不会提交恢复', realignCalls.length, 1);
+T.eq('取消保留库存不变', S.readState().pool.cards, beforeCancel);
+
+const expectedPreview = previewCurrent();
+realignButton.click();
+await flushUI();
+document.getElementById('dr-realign-accept').click();
+document.getElementById('dr-realign-accept').click();
+await flushUI();
+const submissions = realignCalls.filter(Boolean);
+T.eq('确认只提交一次并完整携带预览约束', submissions, [{ ...expectedPreview, confirmed: true }]);
+T.eq('提交后关闭确认框', realignDialog.open, false);
+T.eq('恢复成功后隐藏入口', realignRow.hidden, true);
+T.eq('沿用操作未调用清池', resetCalls, 0);
+T.eq('沿用操作未调用建池', buildCalls, 0);
+
+await prepareRealignment();
+previewRealign = () => ({ ok: false, reason: '当前变化不限于开场，不能直接沿用。' });
+realignButton.click();
+await flushUI();
+T.eq('失败预览不打开确认框', realignDialog.open, false);
+T.ok('失败预览给出后端原因', /不能直接沿用/.test(document.getElementById('dr-pool-msg').textContent));
+T.eq('失败预览不自动提交', realignCalls.filter(Boolean).length, 0);
+
+await prepareRealignment();
+realignButton.click();
+await flushUI();
+env.ctx.chatMetadata.baobaodai.revision = S.readState().revision + 1;
+document.getElementById('dr-realign-accept').click();
+await flushUI();
+T.eq('状态变化仍交由后端验证旧预览约束', realignCalls.filter(Boolean).length, 1);
+T.ok('提交被拒后显示状态变化原因', /卡池状态已变化/.test(document.getElementById('dr-pool-msg').textContent));
+T.eq('被拒操作不报告恢复成功', S.readState().pool.status, 'stale');
+
+await prepareRealignment();
+realignButton.click();
+await flushUI();
+env.ctx.chatId = 'other-ui-chat';
+await env.emitter.emit(TYPES.CHAT_CHANGED, env.ctx.chatId);
+await E.ready();
+await flushUI();
+T.eq('切换聊天关闭已打开的确认框', realignDialog.open, false);
+document.getElementById('dr-realign-accept').click();
+await flushUI();
+T.eq('旧聊天确认按钮不能提交到新聊天', realignCalls.filter(Boolean).length, 0);
+
+for (const switchBack of [false, true]) {
+    await prepareRealignment();
+    const delayedPreview = previewCurrent();
+    let resolvePreview;
+    previewRealign = () => new Promise(resolve => { resolvePreview = resolve; });
+    realignButton.click();
+    await flushUI();
+    env.ctx.chatId = 'other-ui-chat';
+    await env.emitter.emit(TYPES.CHAT_CHANGED, env.ctx.chatId);
+    await E.ready();
+    await flushUI();
+    if (switchBack) {
+        env.ctx.chatId = originalChatId;
+        await env.emitter.emit(TYPES.CHAT_CHANGED, env.ctx.chatId);
+        await E.ready();
+        await flushUI();
+    }
+    resolvePreview(delayedPreview);
+    await flushUI();
+    T.eq(switchBack ? '切走再切回也不打开过期预览' : '预览期间切换聊天不弹旧确认', realignDialog.open, false);
+    T.eq(switchBack ? '切回后的过期预览零提交' : '跨聊天过期预览零提交', realignCalls.filter(Boolean).length, 0);
+    if (switchBack) T.ok('切回后不会把过期预览提示成已保存', /已变化/.test(document.getElementById('dr-pool-msg').textContent));
+}
+window.__baobaodaiApp = originalApp;
+
 process.exit(T.report('百宝袋 · 面板投送状态回归') ? 1 : 0);

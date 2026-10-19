@@ -9,11 +9,11 @@ import { buildContext } from './context.js';
 import { ask } from './ask.js';
 import {
     buildPool, resetPool, discardPoolCard, drawPool, validatePoolSource, bindPool, settlePool,
-    maybeAutoPool, retireOutOfScopeCards,
+    maybeAutoPool, retireOutOfScopeCards, realignPoolSource,
 } from './pool.js';
 import { listModels as relayListModels, directAvailable } from './relay.js';
 
-export const VERSION = '0.5.17';
+export const VERSION = '0.5.18';
 
 const prepared = new Map(), terminal = new Set();
 let bootPromise = null;
@@ -268,7 +268,7 @@ export const app = {
         return { ok: true, models: result.models, via: result.via };
     },
     cancelModelList: () => {},
-    buildPool, resetPool, discardPoolCard,
+    buildPool, resetPool, discardPoolCard, realignPoolSource,
     saveCfg, saveRelay, selectRelay, removeRelay, repairRelays,
     getDefaultPrompts,
     setTone: text => localEdit(s => { s.tone = H.cut(text, 4000); }),

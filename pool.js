@@ -5,6 +5,7 @@ import {
     poolOf, newPool, releasePool, consumePool, archiveActive, localEdit, setDiagnostic, getDiagnostic,
 } from './state.js';
 import { buildContext, openingSource } from './context.js';
+import { comparePoolSources } from './pool-source.js';
 import { ask } from './ask.js';
 
 const SLIP_MIN = 2, SLIP_MAX = 40;
@@ -68,7 +69,9 @@ export async function buildPool(options) {
         j.deadline = Date.now() + (config.poolTimeout + 30) * 1000;
         const categories = poolCategories(config); if (!categories.length) throw Error('至少启用一个分类');
         const conn = apiConfig('chime'); if (!conn.url || !conn.model) throw Error('请先配置并保存创意空投机 API 地址和模型');
-        const ms = H.messages(), source = await openingSource(j, ms), previous = poolOf(readState());
+        const ms = H.messages();
+        await validatePoolSource(j, ms, undefined, true);
+        const source = await openingSource(j, ms), previous = poolOf(readState());
         if (previous.owner && String(previous.owner) !== String(j.chatId)) throw Error('这是从其他聊天复制的池，请先明确重建为本聊天卡池');
         if (previous.source && previous.source.fingerprint !== source.fingerprint) throw Error('角色卡、user 或开场已变化；旧池已保留，请明确重建，不能混入另一套设定');
         // 目标值每次按实际库存重算，失败或部分完成不能把缺口累加上去
@@ -148,6 +151,7 @@ function restorePoolReadiness(p) {
     });
     p.status = missing ? 'partial' : 'ready';
     p.error = '';
+    delete p.sourceMismatch;
     return true;
 }
 
@@ -155,65 +159,102 @@ function clearSourceDiagnostic() {
     if (getDiagnostic().startsWith('卡池与当前')) setDiagnostic('');
 }
 
-function changedSourceParts(previous, fresh, changedOwner) {
-    const split = text => {
-        const source = String(text || '');
-        const headings = Array.from(source.matchAll(/(?:^|\n\n)【(初始角色卡|user 设定|第一楼开场|聊天开场设定)】\n/g));
-        const parts = {};
-        headings.forEach((heading, i) => {
-            (parts[heading[1]] ||= []).push(source.slice(heading.index + heading[0].length,
-                i + 1 < headings.length ? headings[i + 1].index : source.length));
-        });
-        return parts;
-    };
-    const before = split(previous.text), after = split(fresh.text);
-    const names = { '初始角色卡': '角色卡', 'user 设定': 'user设定', '第一楼开场': '开场正文', '聊天开场设定': '聊天场景' };
-    const changed = Object.keys(names).filter(key => JSON.stringify(before[key] || []) !== JSON.stringify(after[key] || []))
-        .map(key => names[key]);
-    if (changedOwner) changed.unshift('聊天归属');
-    if (previous.identity && previous.identity !== fresh.identity && !changed.includes('user设定')) changed.push('角色/user身份');
-    return changed.join('、') || '角色/user/开场/场景';
+function assertPoolSnapshot(next, previous) {
+    const a = poolOf(next), b = poolOf(previous);
+    if (next.revision !== previous.revision || a.owner !== b.owner
+        || JSON.stringify(a.source) !== JSON.stringify(b.source)) throw Error('卡池状态已变化，请重试');
 }
 
-export async function validatePoolSource(job, ms) {
-    const s = readState(), p = poolOf(s);
-    if (config.chimeMode !== 'pool' || !p.source) return;
+function rememberSource(p, fresh, reason) {
+    p.sourceHistory = (Array.isArray(p.sourceHistory) ? p.sourceHistory : []).slice(-2);
+    p.sourceHistory.push({ source: H.clone(p.source), owner: p.owner, reason, at: Date.now() });
+    p.source = fresh;
+}
+
+export async function validatePoolSource(job, ms, expectedState, force = false) {
+    const s = expectedState || readState(), p = poolOf(s);
+    if ((!force && config.chimeMode !== 'pool') || !p.source) return s;
     const fresh = await openingSource(job, ms);
-    if (String(p.owner) === String(job.chatId) && p.source.fingerprint === fresh.fingerprint) {
-        if (p.status === 'stale') {
-            await change(next => {
+    assertPoolSnapshot(readState(), s);
+    const compared = comparePoolSources(p.source, fresh, ms);
+    const legacy = typeof H.legacyChatKey === 'function' ? H.legacyChatKey() : '';
+    const sameOwner = String(p.owner) === String(job.chatId);
+    const legacyOwner = legacy && String(legacy) !== String(job.chatId) && String(p.owner) === String(legacy);
+    if ((sameOwner || legacyOwner) && (compared.exact || compared.compatible)) {
+        let result = s;
+        if (!sameOwner || compared.compatible || p.status === 'stale') {
+            result = await change(next => {
+                assertPoolSnapshot(next, s);
                 const pool = poolOf(next);
-                if (String(pool.owner) !== String(job.chatId) || !pool.source || pool.source.fingerprint !== fresh.fingerprint) {
-                    throw Error('卡池已改变，未恢复旧卡池状态');
-                }
+                if (compared.compatible) rememberSource(pool, fresh, 'image-normalization');
+                pool.owner = job.chatId;
+                if ((!sameOwner || compared.compatible) && pool.pending) pool.pending.key = '';
                 restorePoolReadiness(pool);
             }, job);
-            clearSourceDiagnostic();
         }
-        return;
-    }
-    const legacy = typeof H.legacyChatKey === 'function' ? H.legacyChatKey() : '';
-    if (legacy && String(legacy) !== String(job.chatId) && String(p.owner) === String(legacy)
-        && p.source.fingerprint === fresh.fingerprint
-        && (!p.source.identity || p.source.identity === fresh.identity)) {
-        await change(next => {
-            const pool = poolOf(next);
-            if (String(pool.owner) !== String(legacy) || !pool.source || pool.source.fingerprint !== fresh.fingerprint
-                || (pool.source.identity && pool.source.identity !== fresh.identity)) throw Error('卡池已改变，未迁移旧聊天索引');
-            pool.owner = job.chatId;
-            if (pool.pending) pool.pending.key = '';
-            restorePoolReadiness(pool);
-        }, job);
         clearSourceDiagnostic();
-        return;
+        return result;
     }
-    const changed = changedSourceParts(p.source, fresh, String(p.owner) !== String(job.chatId));
+    const openingOnly = sameOwner && compared.openingOnly;
+    const changed = (sameOwner ? '' : '聊天归属、') + compared.changed;
+    const recovery = openingOnly ? '若开场剧情未改，可点“沿用现有卡池”恢复' : '请明确重建';
     await change(next => {
-        archiveActive(next, 'retired'); next.activeCards = []; next.floatStage = 'done';
+        assertPoolSnapshot(next, s);
+        archiveActive(next, 'retired'); next.activeCards = []; next.floatStage = 'done'; next.floatCard = null;
         const pool = poolOf(next);
-        pool.status = 'stale'; pool.error = changed + '已变化；旧池保留但暂停使用，请明确重建';
+        pool.status = 'stale'; pool.sourceMismatch = { openingOnly };
+        pool.error = changed + '与建池快照不同；旧池保留但暂停使用，' + recovery;
     }, job);
-    throw Error('卡池与当前' + changed + '不匹配，已撤下旧纸条；请明确重建');
+    throw Error('卡池与当前' + changed + '不匹配，已撤下旧纸条；' + recovery);
+}
+
+// Explicit recovery for legacy snapshots that captured the first visible reply
+// after a summarizer hid the actual opening. No new cards or delivery receipts.
+export async function realignPoolSource(options = {}) {
+    let recoveryJob;
+    try {
+        const key = H.chatKey(), j = { chatId: key, epoch, deadline: Date.now() + 10000 };
+        await guard(j);
+        if (Array.from(jobs).some(job => !job.cancelled)) throw Error('百宝袋正在处理，请稍后再试');
+        const s = readState(), p = poolOf(s), ms = H.messages();
+        if (String(p.owner) !== String(key) || !p.source || !p.cards.length) throw Error('仅可沿用当前聊天已有的卡池');
+        const fresh = await openingSource(j, ms), compared = comparePoolSources(p.source, fresh, ms);
+        if (!compared.openingOnly) throw Error('仅开场差异可以沿用；角色卡、user、场景或聊天归属变化不能重新对齐');
+        const counts = { total: p.cards.length };
+        for (const status of ['available', 'reserved', 'used']) counts[status] = p.cards.filter(c => c.status === status).length;
+        const ticket = { expectedChatId: key, expectedEpoch: j.epoch, expectedRevision: s.revision,
+            expectedSourceFingerprint: p.source.fingerprint, freshFingerprint: fresh.fingerprint,
+            freshOpeningFingerprint: fresh.opening && fresh.opening.fullFingerprint,
+            freshOpeningLength: fresh.opening && fresh.opening.length };
+        if (!options.confirmed) return { ok: true, confirmationRequired: true, counts, ...ticket,
+            reason: '沿用全部纸条和已投记录，撤下未投纸条后重新对齐当前开场；不调用建池 API' };
+        if (Object.keys(ticket).some(k => ticket[k] !== options[k])) throw Error('聊天、开场或卡池状态已变化，请重新确认沿用');
+        recoveryJob = await startJob('pool-realign');
+        if (recoveryJob.chatId !== key || recoveryJob.epoch !== j.epoch) throw Error('聊天已切换，请重新确认沿用');
+        await change(async next => {
+            assertPoolSnapshot(next, s);
+            const current = await openingSource(recoveryJob, H.messages());
+            if (current.identity !== fresh.identity || current.text !== fresh.text
+                || JSON.stringify(current.opening) !== JSON.stringify(fresh.opening)) throw Error('开场已变化，请重新确认沿用');
+            // Character loading can await I/O. Re-read the opening after it so a
+            // concurrent message edit cannot confirm an earlier message snapshot.
+            const liveOpening = H.messages().find(m => m.role === 'assistant');
+            if (!liveOpening || !current.opening || liveOpening.index !== current.opening.index
+                || liveOpening.narrative.length !== current.opening.length
+                || H.hash(liveOpening.narrative) !== current.opening.fullFingerprint) throw Error('开场已变化，请重新确认沿用');
+            assertPoolSnapshot(readState(), s);
+            archiveActive(next, 'retired');
+            next.activeCards = []; next.floatStage = 'done'; next.floatCard = null;
+            next.candidates = []; next.lastPreparedAnchor = ''; next.coordText = '';
+            const pool = poolOf(next);
+            rememberSource(pool, current, 'user-realigned-opening');
+            pool.status = 'stale'; restorePoolReadiness(pool);
+        }, recoveryJob);
+        clearSourceDiagnostic();
+        notify();
+        return { ok: true, reason: '已沿用现有卡池并恢复使用；纸条和已投记录已保留，未调用 API' };
+    } catch (e) { return { ok: false, reason: H.cut(e.message || e, 240) }; }
+    finally { if (recoveryJob) { stop(recoveryJob); jobs.delete(recoveryJob); notify(); } }
 }
 
 export async function bindPool(job, channelAvailable = true) {
@@ -249,6 +290,7 @@ export async function settlePool(event) {
 }
 
 export async function drawPool(s, round, ms, job, preview) {
+    s = await validatePoolSource(job, ms, s, true);
     const p = poolOf(s);
     if (!p.source || !p.cards.length) throw Error('本聊天还没有批量卡池，请先点“开始/继续建池”');
     const source = await openingSource(job, ms);

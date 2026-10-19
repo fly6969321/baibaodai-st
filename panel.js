@@ -8,6 +8,7 @@ let cleanups = [], disposed = false, refreshId = 0, currentChat = null, snap = n
 const dirty = new Set(), inputRevision = new Map();
 let pending = 0, poll = null, pollCount = 0;
 let deliveryIntent = null, resetConfirmationChat = null, repairArmed = false;
+let realignConfirmation = null, realignRequestId = 0;
 let poolPage = 0, poolInventoryVisible = false, poolCategory = 'plot';
 let prefs = {}, theme = 'day';
 
@@ -184,6 +185,10 @@ function renderPool(r) {
         + summary + (p.pending ? '\n' + t('pool.pendingHint') : '') + (p.error ? '\n' + p.error : '');
     $('dr-pool-summary').style.whiteSpace = 'pre-line';
     ['dr-pool-build', 'dr-pool-refill', 'dr-pool-save', 'dr-pool-reset'].forEach(id => { $(id).disabled = !!r.busy || pending > 0; });
+    const canRealign = p.status === 'stale' && p.sourceMismatch && p.sourceMismatch.openingOnly === true;
+    $('dr-pool-realign-row').hidden = !canRealign;
+    $('dr-pool-realign').disabled = !!r.busy || pending > 0 || !app() || typeof app().realignPoolSource !== 'function';
+    if (!canRealign) closeRealignDialog();
     const status = $('dr-pool-view').value;
     panel.querySelectorAll('[data-pool-category]').forEach(button => {
         const category = button.dataset.poolCategory;
@@ -235,7 +240,7 @@ function render(r) {
         $('dr-preview-box').hidden = true;
     }
     currentChat = r.chatId;
-    if (changed) { poolPage = 0; $('dr-pool-consent').checked = false; deliveryIntent = null; closeResetDialog(); }
+    if (changed) { poolPage = 0; $('dr-pool-consent').checked = false; deliveryIntent = null; closeResetDialog(); closeRealignDialog(); }
     renderPool(r);
     $('dr-channel').textContent = r.channels ? r.channels.reason : t('repair.channelPending');
     if (s.ngSuggested) $('dr-channel').textContent += ' · ' + t('repair.ng');
@@ -345,6 +350,34 @@ function closeResetDialog() {
     if ($('dr-reset-dialog').open) $('dr-reset-dialog').close();
 }
 
+function closeRealignDialog() {
+    realignRequestId++;
+    realignConfirmation = null;
+    if ($('dr-realign-dialog').open) $('dr-realign-dialog').close();
+}
+
+async function previewPoolRealignment(api, chatId, requestId) {
+    if (typeof api.realignPoolSource !== 'function') throw Error(t('ui.wait'));
+    const preview = await api.realignPoolSource();
+    if (disposed || requestId !== realignRequestId || currentChat !== chatId) return { ok: false, reason: t('pool.realignChanged') };
+    if (!preview || preview.ok === false) return preview || { ok: false, reason: t('repair.failed') };
+    if (!preview.confirmationRequired || preview.expectedChatId !== chatId) throw Error(t('pool.realignChanged'));
+    const current = await api.snapshot();
+    if (disposed || requestId !== realignRequestId || currentChat !== chatId || current.chatId !== chatId) {
+        return { ok: false, reason: t('pool.realignChanged') };
+    }
+    const pool = current.state.pool;
+    if (!pool || pool.status !== 'stale' || !pool.sourceMismatch || pool.sourceMismatch.openingOnly !== true
+        || current.state.revision !== preview.expectedRevision) throw Error(t('pool.realignChanged'));
+    realignConfirmation = preview;
+    const counts = preview.counts || {};
+    $('dr-realign-counts').textContent = t('pool.realignCounts').replace(/\{(total|available|reserved|used)\}/g,
+        (_, key) => String(Number.isFinite(counts[key]) ? counts[key] : 0));
+    $('dr-realign-dialog').showModal();
+    $('dr-realign-cancel').focus();
+    return { ok: true, reason: t('pool.realignReview') };
+}
+
 function poolConsent() { if (!$('dr-pool-consent').checked) throw Error(t('pool.needConsent')); }
 
 async function startPool(a, refill) {
@@ -359,7 +392,7 @@ async function startPool(a, refill) {
 function bind() {
     setupDrag(ball, ball, true);
     setupDrag($('dr-panel-head'), panel, false);
-    on($('dr-close'), 'click', () => { closeResetDialog(); panel.classList.remove('show'); });
+    on($('dr-close'), 'click', () => { closeResetDialog(); closeRealignDialog(); panel.classList.remove('show'); });
     on($('dr-theme'), 'click', () => { theme = theme === 'day' ? 'night' : 'day'; applyTheme(); remember(); });
     on($('dr-ball-toggle'), 'click', () => {
         const hidden = !ball.classList.contains('hide');
@@ -437,8 +470,29 @@ function bind() {
     click('dr-pool-refill', 'dr-pool-msg', a => startPool(a, true));
     click('dr-pool-stop', 'dr-pool-msg', a => { a.cancel(); return { ok: true, reason: t('pool.stopped') }; });
     click('dr-pool-save', 'dr-pool-msg', a => { if ($('dr-pool-auto').checked) poolConsent(); return saveFields(a, '#dr-pool-pane [data-config]'); });
+    on($('dr-pool-realign'), 'click', () => {
+        if (!snap || !app() || pending || snap.busy || $('dr-pool-realign-row').hidden
+            || $('dr-realign-dialog').open || $('dr-reset-dialog').open) return;
+        const chatId = currentChat, requestId = ++realignRequestId;
+        act('dr-pool-msg', api => previewPoolRealignment(api, chatId, requestId));
+    });
+    on($('dr-realign-cancel'), 'click', closeRealignDialog);
+    on($('dr-realign-dialog'), 'close', () => { if (!$('dr-realign-dialog').open) realignConfirmation = null; });
+    on($('dr-realign-dialog'), 'cancel', () => { realignRequestId++; realignConfirmation = null; });
+    on($('dr-realign-accept'), 'click', () => {
+        const preview = realignConfirmation;
+        if (!preview || !$('dr-realign-dialog').open || pending) return;
+        closeRealignDialog();
+        act('dr-pool-msg', async api => {
+            const current = await api.snapshot();
+            if (disposed || currentChat !== preview.expectedChatId || current.chatId !== preview.expectedChatId) {
+                throw Error(t('repair.chatChanged'));
+            }
+            return api.realignPoolSource(Object.assign({}, preview, { confirmed: true }));
+        });
+    });
     on($('dr-pool-reset'), 'click', () => {
-        if (!snap || !app() || pending || snap.busy || $('dr-reset-dialog').open) return;
+        if (!snap || !app() || pending || snap.busy || $('dr-reset-dialog').open || $('dr-realign-dialog').open) return;
         resetConfirmationChat = currentChat;
         $('dr-reset-dialog').showModal();
         $('dr-reset-cancel').focus();
@@ -581,6 +635,7 @@ export async function mountPanel() {
 
     window.__baobaodaiPanelDispose = () => {
         closeResetDialog();
+        closeRealignDialog();
         disposed = true; clearInterval(poll);
         cleanups.forEach(f => { try { f(); } catch (_) {} });
         cleanups = [];

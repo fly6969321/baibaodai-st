@@ -58,18 +58,23 @@ export async function openingSource(job, ms) {
     const ids = [];
     for (const section of await H.characterSections(4, { withOpening: true, raw: true })) {
         ids.push(section.id);
-        sections.push('【初始角色卡】\n' + H.cut(section.text, 10000));
+        sections.push({ kind: '初始角色卡', text: H.cut(section.text, 10000) });
         await guard(job);
     }
     const persona = H.personaSection(true);
-    if (persona) sections.push('【user 设定】\n' + H.cut(persona, 5000));
+    if (persona) sections.push({ kind: 'user 设定', text: H.cut(persona, 5000) });
     // /hide and summarizers set is_system on the original assistant message.
     // Hiding the opening changes prompt visibility, not the pool's source story.
     const opening = ms.find(m => m.role === 'assistant');
-    if (opening) sections.push('【第一楼开场】\n' + H.cut(opening.narrative, 5000));
+    if (opening) sections.push({ kind: '第一楼开场', text: H.cut(opening.narrative, 5000) });
     const scenario = H.scenarioOverride(true);
-    if (scenario) sections.push('【聊天开场设定】\n' + H.cut(scenario, 4000));
+    if (scenario) sections.push({ kind: '聊天开场设定', text: H.cut(scenario, 4000) });
     if (!sections.length) throw Error('未读到角色卡、user 设定或开场白，未开始建池');
-    const text = sections.join('\n\n');
-    return { identity: ids.join(',') + ':' + H.personaId(), fingerprint: H.hash(text), text, capturedAt: Date.now() };
+    const text = sections.map(section => '【' + section.kind + '】\n' + section.text).join('\n\n');
+    return {
+        schemaVersion: 2, sections,
+        opening: opening ? { index: opening.index, truncated: opening.narrative.length >= 5000,
+            fullFingerprint: H.hash(opening.narrative), length: opening.narrative.length } : null,
+        identity: ids.join(',') + ':' + H.personaId(), fingerprint: H.hash(text), text, capturedAt: Date.now(),
+    };
 }
