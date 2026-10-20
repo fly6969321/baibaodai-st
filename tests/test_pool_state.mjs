@@ -318,12 +318,10 @@ await test('source validation does not clear an unrelated API error', async () =
     assert.equal(s.pool.error, 'API HTTP 500');
 });
 
-await test('actual source edits remain stale and diagnostics reveal only the changed section', async () => {
+await test('only role settings and user settings participate in pool source validation', async () => {
     const cases = [
-        ['开场正文', ctx => { ctx.chat[0].mes = 'PRIVATE_SENTINEL opening'; }],
         ['角色卡', ctx => { ctx.characters[0].description = 'PRIVATE_SENTINEL character'; }],
         ['user设定', ctx => { ctx.name1 = 'PRIVATE_SENTINEL persona'; }],
-        ['聊天场景', ctx => { ctx.chatMetadata.scenario = 'PRIVATE_SENTINEL scene'; }],
     ];
     for (const [label, edit] of cases) {
         const state = selectedState();
@@ -346,6 +344,20 @@ await test('actual source edits remain stale and diagnostics reveal only the cha
         assert.equal(s.pool.error.includes('PRIVATE_SENTINEL'), false);
         assert.deepEqual(s.pool.cards, cards);
         assert.deepEqual(s.history, history);
+    }
+    for (const edit of [
+        ctx => { ctx.chat[0].mes = 'PRIVATE_SENTINEL opening'; },
+        ctx => { ctx.characters[0].first_mes = 'PRIVATE_SENTINEL greeting'; },
+        ctx => { ctx.characters[0].scenario = 'PRIVATE_SENTINEL card scenario'; },
+        ctx => { ctx.chatMetadata.scenario = 'PRIVATE_SENTINEL chat scenario'; },
+    ]) {
+        const state = selectedState(), h = env(state), raw = h.ctx.chatMetadata.baobaodai;
+        raw.pool.owner = H.chatKey();
+        raw.pool.source = await Context.openingSource(h.job('g1'), H.messages());
+        edit(h.ctx);
+        await P.validatePoolSource(h.job('g1'), H.messages());
+        assert.equal(S.readState().pool.status, 'ready');
+        assert.equal(S.readState().pool.source.fingerprint, raw.pool.source.fingerprint);
     }
 });
 

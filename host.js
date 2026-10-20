@@ -258,7 +258,8 @@ export async function characterSections(limit, opts) {
     for (const chid of activeCharacterIds().slice(0, limit)) {
         const ch = await characterAt(chid);
         if (!ch) continue;
-        const fields = [ch.name, ch.description, ch.personality, ch.scenario];
+        const fields = [ch.name, ch.description, ch.personality];
+        if (opts.withScenario !== false) fields.push(ch.scenario);
         if (opts.withOpening) fields.push(ch.first_mes);
         const text = fields.filter(Boolean).map(x => opts.raw ? String(x) : substitute(x)).join('\n');
         if (text.trim()) out.push({ id: chid, text });
@@ -291,19 +292,74 @@ let loreLoader = null;
 async function loadLoreApi() {
     if (loreLoader) return loreLoader;
     loreLoader = (async () => {
-        try { const mod = await import('../../../world-info.js'); return mod.getSortedEntries || null; }
+        try { return await import('../../../world-info.js'); }
         catch (_) { return null; }
     })();
     return loreLoader;
 }
 
 export async function loreEntries() {
-    const getSortedEntries = await loadLoreApi();
+    const mod = await loadLoreApi();
+    const getSortedEntries = mod && mod.getSortedEntries;
     if (!getSortedEntries) return [];
     try {
         const entries = await getSortedEntries();
         return Array.isArray(entries) ? entries : [];
     } catch (_) { return []; }
+}
+
+// Read a fresh, static catalogue for each paid pool build. getSortedEntries
+// emits events and follows the current speaker, so it is reserved for the
+// existing live-context path above. No chat text or scenario is read here.
+export async function poolLoreContext(checkpoint) {
+    const check = typeof checkpoint === 'function' ? checkpoint : async () => {};
+    await check();
+    const mod = await loadLoreApi();
+    await check();
+    const c = ctx(), characters = [];
+    for (const chid of activeCharacterIds().slice(0, 4)) {
+        const ch = await characterAt(chid);
+        await check();
+        if (!ch || ch.shallow) throw Error('角色资料尚未加载完整，无法读取绑定世界书，请重试');
+        const avatar = String(ch.avatar || '');
+        characters.push({
+            avatar, fileName: avatar.replace(/\.[^/.]+$/, ''),
+            tags: Array.isArray(c.tagMap && c.tagMap[avatar]) ? c.tagMap[avatar].slice() : [],
+            primaryBook: ch.data && ch.data.extensions && ch.data.extensions.world,
+        });
+    }
+    const settings = mod && typeof mod.getWorldInfoSettings === 'function' ? mod.getWorldInfoSettings() : {};
+    const worldInfo = mod && mod.world_info || settings.world_info || {};
+    const byName = new Map();
+    function addBook(name, bound) {
+        // A worldbook name is an exact identifier; whitespace/case folding can
+        // silently select another book. A duplicate bound book stays bound.
+        if (typeof name !== 'string' || !name.trim()) return;
+        const previous = byName.get(name);
+        if (previous) previous.bound = previous.bound || bound;
+        else byName.set(name, { name, bound });
+    }
+    const charLore = Array.isArray(worldInfo.charLore) ? worldInfo.charLore : [];
+    for (const ch of characters) {
+        addBook(ch.primaryBook, true);
+        const extra = charLore.find(item => item && item.name === ch.fileName);
+        if (extra && Array.isArray(extra.extraBooks)) extra.extraBooks.forEach(name => addBook(name, true));
+    }
+    addBook(c.chatMetadata && c.chatMetadata.world_info, true);
+    addBook(c.powerUserSettings && c.powerUserSettings.persona_description_lorebook, true);
+    const globals = mod && Array.isArray(mod.selected_world_info) ? mod.selected_world_info : [];
+    globals.forEach(name => addBook(name, false));
+    const books = Array.from(byName.values()).sort((a, b) => Number(b.bound) - Number(a.bound)
+        || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const loader = typeof c.loadWorldInfo === 'function' ? c.loadWorldInfo.bind(c)
+        : mod && typeof mod.loadWorldInfo === 'function' ? mod.loadWorldInfo : null;
+    return {
+        books, characters, load: loader,
+        settings: {
+            caseSensitive: !!settings.world_info_case_sensitive,
+            matchWholeWords: !!settings.world_info_match_whole_words,
+        },
+    };
 }
 
 let dragLoader = null;

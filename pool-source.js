@@ -7,7 +7,7 @@ const serialize = sections => sections.map(s => '【' + s.kind + '】\n' + s.tex
 // or persona text, and require an exact round trip before interpreting its sections.
 function sectionsOf(source) {
     if (!source || typeof source.text !== 'string' || H.hash(source.text) !== source.fingerprint) return null;
-    if (source.schemaVersion === 2) {
+    if (source.schemaVersion === 2 || source.schemaVersion === 3) {
         const sections = source.sections;
         return Array.isArray(sections) && sections.length && sections.every(s => s && NAMES[s.kind] && typeof s.text === 'string')
             && serialize(sections) === source.text ? sections : null;
@@ -18,32 +18,31 @@ function sectionsOf(source) {
     return sections.length && serialize(sections) === source.text ? sections : null;
 }
 
-export function comparePoolSources(previous, fresh, ms) {
+export function comparePoolSources(previous, fresh, legacy) {
     const before = sectionsOf(previous), after = sectionsOf(fresh);
     const identityMatches = !previous.identity || previous.identity === fresh.identity;
-    const priorOpening = previous.opening, currentOpening = fresh.opening;
-    const hasFullOpening = priorOpening && typeof priorOpening.fullFingerprint === 'string';
-    const unknownOpening = !hasFullOpening && currentOpening && currentOpening.truncated;
-    const changedFullOpening = hasFullOpening && (!currentOpening
-        || priorOpening.fullFingerprint !== currentOpening.fullFingerprint || priorOpening.length !== currentOpening.length);
-    const exact = identityMatches && !unknownOpening && !changedFullOpening
-        && previous.fingerprint === fresh.fingerprint && previous.text === fresh.text;
-    if (exact) return { exact: true, compatible: false, openingOnly: false, changed: '' };
+    const currentSchema = previous.schemaVersion === 3;
+    const fullMatch = previous.settingsFingerprint === fresh.settingsFingerprint && previous.settingsLength === fresh.settingsLength;
+    const exact = !!(before && after && currentSchema && identityMatches && fullMatch
+        && previous.fingerprint === fresh.fingerprint && previous.text === fresh.text);
+    if (exact) return { exact: true, compatible: false, changed: '' };
+    const sameValues = (a, b, kind) => JSON.stringify((a || []).filter(s => s.kind === kind).map(s => s.text))
+        === JSON.stringify((b || []).filter(s => s.kind === kind).map(s => s.text));
+    const oldCharacters = (before || []).filter(s => s.kind === '初始角色卡');
+    const newCharacters = (after || []).filter(s => s.kind === '初始角色卡');
+    // Older snapshots flattened name/description/personality/scenario/greeting
+    // into one field. The stable fields are a prefix; require a field boundary
+    // after that prefix so a shortened description/personality cannot pass.
+    const characterSettingsMatch = oldCharacters.length === newCharacters.length
+        && oldCharacters.every((section, index) => section.text.startsWith(newCharacters[index].text)
+            && (section.text.length === newCharacters[index].text.length
+                || section.text[newCharacters[index].text.length] === '\n'));
+    const compatible = !!(!currentSchema && before && after && identityMatches && characterSettingsMatch
+        && sameValues(before, after, 'user 设定'));
+    if (compatible) return { exact: false, compatible: true, changed: '' };
     const values = (sections, kind) => (sections || []).filter(s => s.kind === kind).map(s => s.text);
-    const changed = Object.keys(NAMES).filter(kind => JSON.stringify(values(before, kind)) !== JSON.stringify(values(after, kind)));
-    if ((unknownOpening || changedFullOpening) && !changed.includes('第一楼开场')) changed.push('第一楼开场');
+    const changed = ['初始角色卡', 'user 设定'].filter(kind => JSON.stringify(values(before, kind)) !== JSON.stringify(values(after, kind)));
     const labels = changed.map(kind => NAMES[kind]);
     if (!identityMatches) labels.push('角色/user身份');
-    const oldOpenings = values(before, '第一楼开场'), newOpenings = values(after, '第一楼开场');
-    const sameLayout = before && after && JSON.stringify(before.map(s => s.kind)) === JSON.stringify(after.map(s => s.kind));
-    const openingOnly = !!(sameLayout && previous.identity === fresh.identity && changed.length === 1
-        && changed[0] === '第一楼开场' && oldOpenings.length === 1 && newOpenings.length === 1);
-    const opening = ms.find(m => m.role === 'assistant');
-    // A 5,000-character legacy snapshot may end inside an image block or omit
-    // story text. A truncated snapshot is not proof of unchanged narrative.
-    const compatible = !!(openingOnly && oldOpenings[0].length < 5000 && newOpenings[0].length < 5000
-        && !(fresh.opening && fresh.opening.truncated)
-        && H.normalizeOpeningNarrative(oldOpenings[0], opening && opening.raw)
-            === H.normalizeOpeningNarrative(newOpenings[0], opening && opening.raw));
-    return { exact: false, compatible, openingOnly, changed: labels.join('、') || '角色/user/开场/场景' };
+    return { exact: false, compatible: false, changed: labels.join('、') || '角色/user设定' };
 }

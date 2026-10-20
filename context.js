@@ -51,30 +51,45 @@ export async function buildContext(job, ms, s, selection) {
     return parts.join('\n\n');
 }
 
-// 指纹用未展开宏的原文，否则换个 persona 就会误判「设定已变化」
-export async function openingSource(job, ms) {
+// Keep the historical export name for callers. Pool ownership now depends only
+// on raw character/persona settings, never on a chat message, greeting or scenario.
+export async function openingSource(job) {
+    return settingsSource(job, false);
+}
+
+// Reconstruct the old character-card section solely to migrate saved pools.
+// This comparison input is never stored as the new source or sent to the API.
+export async function legacyPoolSource(job) {
+    return settingsSource(job, true);
+}
+
+async function settingsSource(job, legacyOpening) {
     await guard(job);
     const sections = [];
+    const fullSections = [];
     const ids = [];
-    for (const section of await H.characterSections(4, { withOpening: true, raw: true })) {
+    for (const section of await H.characterSections(4, { withOpening: legacyOpening, withScenario: legacyOpening, raw: true })) {
         ids.push(section.id);
         sections.push({ kind: '初始角色卡', text: H.cut(section.text, 10000) });
+        fullSections.push({ kind: '初始角色卡', text: section.text });
         await guard(job);
     }
     const persona = H.personaSection(true);
-    if (persona) sections.push({ kind: 'user 设定', text: H.cut(persona, 5000) });
-    // /hide and summarizers set is_system on the original assistant message.
-    // Hiding the opening changes prompt visibility, not the pool's source story.
-    const opening = ms.find(m => m.role === 'assistant');
-    if (opening) sections.push({ kind: '第一楼开场', text: H.cut(opening.narrative, 5000) });
-    const scenario = H.scenarioOverride(true);
-    if (scenario) sections.push({ kind: '聊天开场设定', text: H.cut(scenario, 4000) });
-    if (!sections.length) throw Error('未读到角色卡、user 设定或开场白，未开始建池');
+    if (persona) {
+        sections.push({ kind: 'user 设定', text: H.cut(persona, 5000) });
+        fullSections.push({ kind: 'user 设定', text: persona });
+    }
+    const scenario = legacyOpening ? H.scenarioOverride(true) : '';
+    if (scenario) {
+        sections.push({ kind: '聊天开场设定', text: H.cut(scenario, 4000) });
+        fullSections.push({ kind: '聊天开场设定', text: scenario });
+    }
+    if (!sections.length) throw Error('未读到角色卡或 user 设定，未开始建池');
     const text = sections.map(section => '【' + section.kind + '】\n' + section.text).join('\n\n');
+    const fullText = JSON.stringify(fullSections);
     return {
-        schemaVersion: 2, sections,
-        opening: opening ? { index: opening.index, truncated: opening.narrative.length >= 5000,
-            fullFingerprint: H.hash(opening.narrative), length: opening.narrative.length } : null,
+        schemaVersion: legacyOpening ? 2 : 3, sections,
+        settingsFingerprint: H.hash(fullText), settingsLength: fullText.length,
         identity: ids.join(',') + ':' + H.personaId(), fingerprint: H.hash(text), text, capturedAt: Date.now(),
     };
 }

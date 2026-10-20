@@ -6,6 +6,7 @@ import {
 } from './state.js';
 import { buildContext, openingSource } from './context.js';
 import { comparePoolSources } from './pool-source.js';
+import { buildPoolLore } from './pool-lore.js';
 import { ask } from './ask.js';
 
 const SLIP_MIN = 2, SLIP_MAX = 40;
@@ -73,7 +74,7 @@ export async function buildPool(options) {
         await validatePoolSource(j, ms, undefined, true);
         const source = await openingSource(j, ms), previous = poolOf(readState());
         if (previous.owner && String(previous.owner) !== String(j.chatId)) throw Error('这是从其他聊天复制的池，请先明确重建为本聊天卡池');
-        if (previous.source && previous.source.fingerprint !== source.fingerprint) throw Error('角色卡、user 或开场已变化；旧池已保留，请明确重建，不能混入另一套设定');
+        if (previous.source && previous.source.fingerprint !== source.fingerprint) throw Error('角色基础设定或 user 设定已变化；旧池已保留，请明确重建，不能混入另一套设定');
         // 目标值每次按实际库存重算，失败或部分完成不能把缺口累加上去
         const planned = {};
         categories.forEach(k => {
@@ -101,7 +102,10 @@ export async function buildPool(options) {
                 return { ok: true, reason: '卡池已达到目标，未调用 API' };
             }
             const existing = pool.cards.map(c => c.category + '|' + c.hook).slice(-600).join('\n');
-            const body = pool.source.text + '\n\n【本局偏好】\n' + H.cut(state.tone, 2000) + '\n【已有纸条，不要重复】\n' + H.cut(existing, 18000);
+            const lore = await buildPoolLore(j, pool.source.text);
+            await guard(j);
+            const body = pool.source.text + (lore.text ? '\n\n【角色相关世界书】\n' + lore.text : '')
+                + '\n\n【本局偏好】\n' + H.cut(state.tone, 2000) + '\n【已有纸条，不要重复】\n' + H.cut(existing, 18000);
             const reply = await ask(j, 'chime', poolBuildPrompt(quotas), body, {
                 timeout: config.poolTimeout, maxTokens: Math.min(32000, requested * (SLIP_MAX * 3) + 1500), allowPartial: true,
             });
